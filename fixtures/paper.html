@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Continuous Tree Batching: A Measurement Note</title>
+<style>
+  @page { size: A4; margin: 22mm 20mm; }
+  body { font: 11.5pt/1.5 Georgia, serif; color: #111; }
+  h1 { font-size: 22pt; margin: 0 0 6pt; }
+  h2 { font-size: 14pt; margin: 18pt 0 6pt; }
+  p { margin: 0 0 9pt; text-align: justify; }
+  table { border-collapse: collapse; margin: 8pt 0; font-size: 10.5pt; }
+  th, td { border: 1px solid #333; padding: 4pt 10pt; text-align: left; }
+  th { background: #eee; }
+  figure { margin: 12pt 0; }
+  figcaption { font-size: 10pt; color: #333; margin-top: 4pt; }
+  .break { page-break-before: always; }
+  .meta { color: #444; font-size: 10pt; margin-bottom: 14pt; }
+</style></head><body>
+<h1>Continuous Tree Batching: A Measurement Note</h1>
+<p class="meta">Field note · September 2026 · Fixture for the documents ability</p>
+<h2>Abstract</h2>
+<p>We measure how the cost of a multi-agent research run scales when every agent shares one attention context. In continuous tree batching, branches are sequence ids over one shared context and a decode step advances every live branch at once, so the cost of a run is set by how full the cache is, not by how many branches exist. We report cells consumed and wall-clock seconds for four fan-out configurations on a 4-billion-parameter model.</p>
+<h2>Method</h2>
+<p>Each configuration runs the same research question with a different fan-out width. The baseline runs one agent. The wide configuration runs four agents in parallel from a shared spine. The deep configuration chains four agents so each inherits the previous agent's context. The full configuration runs four parallel agents each of which delegates once. Cells are counted as key-value cache entries at the moment the pool closes; seconds are measured from the first token of the plan to the last token of the brief.</p>
+<p>All runs use the same prompt, the same reranker, and the same eight-token stall budget. The reranker scores passages against the original question so that a retrieval two hops away stays on topic. No run was repeated; the numbers are single observations.</p>
+<h2 class="break">Results</h2>
+<p>Table 1 lists the cells consumed and the seconds elapsed for each configuration. Cells grow with width because every parallel agent holds its own suffix; seconds grow more slowly because the parallel branches decode in one batched step.</p>
+<table>
+  <caption>Table 1. Cells and seconds per configuration.</caption>
+  <thead><tr><th>Configuration</th><th>Agents</th><th>Cells</th><th>Seconds</th></tr></thead>
+  <tbody>
+    <tr><td>baseline</td><td>1</td><td>803</td><td>4.2</td></tr>
+    <tr><td>wide</td><td>4</td><td>1611</td><td>6.9</td></tr>
+    <tr><td>deep</td><td>4</td><td>2402</td><td>9.8</td></tr>
+    <tr><td>full</td><td>8</td><td>3175</td><td>11.4</td></tr>
+  </tbody>
+</table>
+<p>The deep configuration costs more cells than the wide one at the same agent count because each chained agent carries its predecessor's context forward. The full configuration is the most expensive in both measures but still finishes in under three times the baseline's seconds while doing eight agents' worth of work.</p>
+<figure>
+  <svg width="440" height="240" viewBox="0 0 440 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bar chart of cells per configuration">
+    <rect x="0" y="0" width="440" height="240" fill="#fff"/>
+    <line x1="60" y1="200" x2="420" y2="200" stroke="#333" stroke-width="1.5"/>
+    <line x1="60" y1="20" x2="60" y2="200" stroke="#333" stroke-width="1.5"/>
+    <text x="14" y="26" font-size="11" fill="#333">cells</text>
+    <text x="30" y="204" font-size="10" fill="#333">0</text>
+    <text x="18" y="112" font-size="10" fill="#333">1600</text>
+    <text x="18" y="24" font-size="10" fill="#333">3200</text>
+    <rect x="80" y="155" width="60" height="45" fill="#2a7fbf"/>
+    <rect x="165" y="110" width="60" height="90" fill="#2a7fbf"/>
+    <rect x="250" y="66" width="60" height="134" fill="#2a7fbf"/>
+    <rect x="335" y="23" width="60" height="177" fill="#2a7fbf"/>
+    <text x="93" y="218" font-size="11" fill="#111">baseline</text>
+    <text x="186" y="218" font-size="11" fill="#111">wide</text>
+    <text x="271" y="218" font-size="11" fill="#111">deep</text>
+    <text x="358" y="218" font-size="11" fill="#111">full</text>
+    <text x="96" y="150" font-size="10" fill="#111">803</text>
+    <text x="178" y="105" font-size="10" fill="#111">1611</text>
+    <text x="263" y="61" font-size="10" fill="#111">2402</text>
+    <text x="348" y="18" font-size="10" fill="#111">3175</text>
+  </svg>
+  <figcaption>Figure 1. Cells per configuration. The bars rise from baseline to full; the deep chain costs more than the wide fan-out at the same agent count.</figcaption>
+</figure>
+<h2 class="break">Discussion</h2>
+<p>Two observations follow. First, the fan-out width, not the agent count, is what sets the cell cost: the wide and deep runs have the same number of agents and differ by almost eight hundred cells. Second, wall-clock time tracks the number of batched decode steps rather than the number of agents, which is why the full configuration is cheap in seconds relative to its cells.</p>
+<p>The obvious limitation is that these are single observations on one question and one model. A second limitation is that the stall budget was fixed; a wider budget would let the deep chain recover from a poor early retrieval and would likely raise its cell count further.</p>
+<h2>Conclusion</h2>
+<p>Sharing one context across a research pool makes the cost of a run a property of cache fullness. Width is the lever, depth is the tax, and batching is why the wall clock forgives both.</p>
+</body></html>

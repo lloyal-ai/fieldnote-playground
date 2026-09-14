@@ -1,0 +1,50 @@
+# harness.yml — the deployment manifest. Your program lives in harness/harness.ts.
+# Every surface listed explicitly; only the fields you chose are shown.
+#
+#   cli      a terminal app       (npm start)
+#   desktop  a native window      (npm run dev:desktop)
+#   web      a browser app + host (npm run serve · npm run dev:web)
+#
+# One harness over a binding, folding the one reduce in harness/state.ts.
+targets: [cli, desktop, web]
+
+model:
+  llm:
+    id: "qwen3.5-4b"          # add `branches:` or `kvCache:` below to override
+    context: 32768
+    branches: 5              # e2e: nSeqMax 5 → research fan-out capacity 2 (5 − 3 reserved)
+    # branches: 32           # concurrent sequences (nSeqMax). Three stand for
+    #                        # the run itself, so a flat fan-out gets the rest
+    #                        # and a wider plan forks in waves.
+    # imageMinTokens: 1024   # per-image detail floor (grounding tasks want it
+    # imageMaxTokens: 1024   # high); the max is the lever for fitting vision
+    #                        # on a tight machine. Unset ⇒ model metadata.
+    # kvCache: q4_0          # attention KV type
+    # mmproj: <catalog id>   # vision projector; defaults to the one the catalog
+    #                        # pairs with this llm. For a local file, drop it at
+    #                        # models/mmproj/<id>.gguf — no config needed.
+    # gpu: cuda              # backend (default · cuda · vulkan); boot fails if unavailable
+  # The corpus + web abilities score retrievals with a reranker. It's resolved +
+  # digest-verified into models/reranker/ on first run, then created per-boot.
+  reranker:
+    id: "qwen3-reranker-0.6b-q8"
+
+sources:
+  outputDir: reports         # settled briefs land here — the sidebar's Completed reports
+
+# abilities:                 # per-ability config committed with the deploy
+#   corpus:
+#     corpusPath: reports    # your own settled briefs become searchable ground
+#                            # (secrets go in env, e.g. TAVILY_API_KEY, not here)
+
+# Local overrides the harness saves (set_effort, set_output_dir) live in
+# harness.json — gitignored, layered over this file.
+
+defaults:
+  effort: low                # e2e: the two-agent level (maxTasks 2)
+  guards:                    # the abilities' gates, by name. Sibling agents feed one
+    url_dedup:   { scope: cohort }    # synthesis here, so a URL or query any of them
+    query_dedup: { scope: cohort }    # attended is not fetched again; `false` switches a gate off
+#   effort: high             # low · medium · high · ultra
+#   reasoningMode: flat      # flat · deep
+#   maxTurns: 10
