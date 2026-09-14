@@ -40,7 +40,7 @@ export function briefs(deps: {
    *  while this is set aborts a run and may have landed a pair nobody was shown; a stop after it has nothing to abort. */
   let live: DocId | null = null;
   let revision = 0;
-  const participation: globalThis.Record<string, boolean> = {};   // per source, for the next ask; absent means on
+  const participation: Record<string, boolean> = {};   // per source, for the next ask; absent means on
   const coverage = new Map<string, Coverage>();                   // what each source was found to cover, for the session
 
   // ── Ask ────────────────────────────────────────────────────────────────────

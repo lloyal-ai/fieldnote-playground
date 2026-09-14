@@ -10,7 +10,7 @@ import {
   type AgentRuntime,
   type TimelineItem,
 } from "./state.js";
-import { emptyRoster } from "@lloyal-labs/ui/fold";
+import { emptyDoc } from "./reduce.js";
 import { BUDGETS } from "../research/budgets.js";
 import type { Pace } from "./pace.js";
 
@@ -22,34 +22,7 @@ export type Moment = "ask" | "frame" | "write" | "settle";
 /** The empty document — a VALUE, not a null-check. Selectors stay total:
  *  with no active document they derive from this and return their natural
  *  empties. Frozen so nothing can turn it into a place. */
-const EMPTY_DOC: DocState = Object.freeze({
-  id: "",
-  query: "",
-  attachments: [],
-  mode: null,
-  direct: false,
-  runEffort: null,
-  phase: "done",
-  plan: null,
-  revision: null,
-  roster: emptyRoster(),
-  researchAgentIds: [],
-  reconAgentIds: [],
-  pendingTaskIndex: null,
-  pendingTaskDescription: null,
-  researchSpawnCount: 0,
-  researchAgentCount: 0,
-  synth: { open: false, buffer: "", done: false, stats: null },
-  answer: null,
-  exchanges: [],
-  ask: null,
-  askAttachments: [],
-  paused: false,
-  closing: false,
-  closedEarly: false,
-  pipelineElapsedMs: 0,
-  pipelineResumedAt: null,
-}) as DocState;
+const EMPTY_DOC: DocState = Object.freeze(emptyDoc());
 
 /** The document the canvas shows; EMPTY_DOC at the picker. */
 const activeDoc = (app: AppState): DocState =>

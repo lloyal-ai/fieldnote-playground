@@ -30,7 +30,7 @@ import { errorMessage } from "./protocol.js";
 const CORPUS = "corpus";
 
 /** What the library keeps for one brief's run: where it writes, and what its inquiries said. */
-interface Record {
+interface RunRecord {
   docId: DocId;
   dir: string;
   query: string;
@@ -117,7 +117,7 @@ export function* openLibrary(
   const { events, registry, wire, run, abilities } = deps;
   /** The unfinished reservations this session owns; whatever is still here at teardown is released. */
   const reserved = new Set<DocId>();
-  let record: Record | null = null;
+  let record: RunRecord | null = null;
   yield* ensure(() => { for (const id of [...reserved]) release(id); });
 
   const reportPath = (id: DocId): string | null => confined(dir(), path.join(dir(), id, "report.md"));
@@ -191,7 +191,7 @@ export function* openLibrary(
 
   /** The answer, its meta line and the annexure index, written as the run's `complete` is said: a report, or an
    *  exchange beside a settled one. Synchronous, on the bus, so the file exists before any reader of `complete` acts. */
-  function finish(r: Record): void {
+  function finish(r: RunRecord): void {
     if (!r.lastAnswer) return;
     const refs = [...r.fileOf.entries()].sort((a, b) => a[1] - b[1])
       .map(([ord, n]) => { const desc = r.taskByOrdinal.get(ord); return `- [Annexure ${n}](./annexure-${n}.md)${desc ? ` — ${desc}` : ""}`; })
@@ -205,7 +205,7 @@ export function* openLibrary(
     else fs.writeFileSync(path.join(r.dir, "report.md"), doc, "utf8");
   }
 
-  function writeAnnexure(r: Record, ord: number, body: string): void {
+  function writeAnnexure(r: RunRecord, ord: number, body: string): void {
     let n = r.fileOf.get(ord);
     if (n === undefined) { n = reserveName(r.dir, "annexure", r.ordinalBase + ord); r.fileOf.set(ord, n); }
     const desc = r.taskByOrdinal.get(ord) ?? "";

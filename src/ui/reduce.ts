@@ -1,41 +1,37 @@
 /**
- * Pure event → AppState reducer.
+ * Pure event → AppState fold: the ONE fold every target shares.
  *
- * Owns: phase transitions, per-agent state machine (<think> boundary
- * detection), timeline item accrual (think / tool_call / tool_result /
- * report), synth buffer.
+ * Owns what this product decides — where an event lands (a session fact, or
+ * the document the run writes into), a document's phases and its birth, the
+ * settling buffer, and what a spawn is FOR: a source probe, a task named by
+ * its key, or an agent tracked without a timeline. The agent records
+ * themselves belong to the generic fold (`@lloyal-labs/ui/fold`) — think
+ * blocks, tool rows, reports and their terminal transitions live there, and
+ * this file only hands it a decision.
  *
- * Emits no side effects. Feed it a trace of StepEvent + AgentEvent; it
- * returns the view-ready state.
+ * Emits no side effects and imports nothing from node, so the terminal view,
+ * the desktop shell's own fold and the browser page all run it.
  */
 
 import { emptyRoster, foldAgents } from '@lloyal-labs/ui/fold';
 import type { AgentRoster, AgentEvent as FoldableAgentEvent } from '@lloyal-labs/ui/fold';
 import type { AppState, SessionState, DocState, DocId, AgentRuntime, SynthState } from './state.js';
 import type { WorkflowEvent } from '../brief/protocol.js';
-import type { Config } from '../app.js';
-import { shortPath } from './short-path.js';
 
 /** This harness's terminal tool: its call ends the turn and is no timeline row. */
 const TERMINAL = 'report';
 
-/** Seed/refresh `participation` from current config. The reducer holds NO
- *  per-ability knowledge: abilities default to included via the `!== false`
- *  convention (any ability absent from the map renders as included), so there's
- *  nothing to seed here on a plain config load. The included-by-default set
- *  is the registry-enabled abilities surfaced via `abilities:state`; per-ability intent is
- *  driven explicitly through `participation:toggled` (chip toggle) and
- *  `set_ability_config` (configuring → the harness sets the bit + re-emits state).
- *  Returns `prev` unchanged — kept as a function so config events have a
- *  single, named place to hook future participation policy. */
-function seedParticipation(
-  prev: Record<string, boolean>,
-  _cfg: Config,
-): Record<string, boolean> {
-  return prev;
+/** Collapse a home-prefixed absolute path for a toast: `~/…`. Hand-written to stay browser-safe — no
+ *  `node:os`, no `node:path` — because every target runs this file. Its inverse, `~` expansion for
+ *  config input, is genuinely node's and lives in `resolvePath` (`@lloyal-labs/rig/node`). */
+function shortPath(p: string): string {
+  if (!p) return p;
+  const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const home = env?.HOME ?? env?.USERPROFILE;
+  if (home && (p === home || p.startsWith(home + '/') || p.startsWith(home + '\\'))) return '~' + p.slice(home.length);
+  return p;
 }
 
-/** The agent records live in the roster the generic fold keeps; a document holds one. */
 /** The fold returns the same roster when an event changed nothing; so does this. */
 const folded = (doc: DocState, r: AgentRoster): DocState => (r === doc.roster ? doc : { ...doc, roster: r });
 
@@ -91,34 +87,32 @@ function withDoc(
   return { ...state, documents, ...extra };
 }
 
+/** A document's fields at rest — the ONE place the shape is spelled. A birth, a restore and the
+ *  selectors' empty document all start here and change only what they know. */
+export function emptyDoc(): DocState {
+  return {
+    id: '', query: '', attachments: [], mode: null, direct: false, runEffort: null,
+    phase: 'done', plan: null, revision: null,
+    roster: emptyRoster(),
+    researchAgentIds: [], reconAgentIds: [],
+    pendingTaskIndex: null, pendingTaskDescription: null,
+    researchSpawnCount: 0, researchAgentCount: 0,
+    synth: EMPTY_SYNTH, answer: null, exchanges: [], ask: null, askAttachments: [],
+    paused: false, closing: false, closedEarly: false,
+    pipelineElapsedMs: 0, pipelineResumedAt: null,
+  };
+}
+
 /** Birth — the only fresh document state in the system. */
 function newDoc(ev: Extract<WorkflowEvent, { type: 'query' }>): DocState {
   return {
+    ...emptyDoc(),
     id: ev.docId,
     query: ev.query,
     attachments: ev.attachments ?? [],
-    mode: null,
     direct: !!ev.direct,
     runEffort: ev.effort ?? null,
     phase: 'planning',
-    plan: null,
-    revision: null,
-    roster: emptyRoster(),
-    researchAgentIds: [],
-    reconAgentIds: [],
-    pendingTaskIndex: null,
-    pendingTaskDescription: null,
-    researchSpawnCount: 0,
-    researchAgentCount: 0,
-    synth: EMPTY_SYNTH,
-    answer: null,
-    exchanges: [],
-    ask: null,
-    askAttachments: [],
-    paused: false,
-    closing: false,
-    closedEarly: false,
-    pipelineElapsedMs: 0,
     pipelineResumedAt: Date.now(),
   };
 }
@@ -143,32 +137,13 @@ function askBranch(doc: DocState, ev: Extract<WorkflowEvent, { type: 'query' }>)
 /** A settled document, whole, from disk. */
 function settledDoc(ev: Extract<WorkflowEvent, { type: 'doc' }>): DocState {
   return {
+    ...emptyDoc(),
     id: ev.docId,
     query: ev.title,
     attachments: ev.attachments ?? [],
     mode: ev.mode,
-    direct: false,
-    runEffort: null,
-    phase: 'done',
-    plan: null,
-    revision: null,
-    roster: emptyRoster(),
-    researchAgentIds: [],
-    reconAgentIds: [],
-    pendingTaskIndex: null,
-    pendingTaskDescription: null,
-    researchSpawnCount: 0,
-    researchAgentCount: 0,
-    synth: EMPTY_SYNTH,
     answer: ev.answer,
     exchanges: ev.exchanges,
-    ask: null,
-    askAttachments: [],
-    paused: false,
-    closing: false,
-    closedEarly: false,
-    pipelineElapsedMs: 0,
-    pipelineResumedAt: null,
   };
 }
 
@@ -279,7 +254,6 @@ function sessionReduce(s: SessionState, ev: WorkflowEvent): SessionState {
         ...s,
         dev: ev.dev ?? s.dev,
         config: ev.config,
-        participation: seedParticipation(s.participation, ev.config),
       };
 
     case 'config:updated': {
@@ -296,7 +270,6 @@ function sessionReduce(s: SessionState, ev: WorkflowEvent): SessionState {
       return {
         ...s,
         config: ev.config,
-        participation: seedParticipation(s.participation, ev.config),
         toast: { id: toastId, message, tone: ev.skipped.length > 0 ? 'warn' : 'success' },
         nextToastId: toastId,
       };

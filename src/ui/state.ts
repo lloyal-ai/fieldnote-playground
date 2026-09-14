@@ -1,7 +1,7 @@
 /**
  * AppState — the ONE fold every target shares.
  *
- * Populated by reducer.ts from the WorkflowEvent stream; node-free, so the
+ * Populated by reduce.ts from the WorkflowEvent stream; node-free, so the
  * cli's Ink view, the desktop main process (the authoritative fold behind
  * `harness:snapshot`), and the browser page all fold the same state.
  * Renderers derive from this state and nothing else — the React view
@@ -128,9 +128,8 @@ export interface DocState {
   /** The planning round the harness armed (`ui:plan_review` / `ui:clarify`); the interface sends it back
    *  with a yes, an answer or an edit, and a stale one is refused. Null when nothing is parked. */
   revision: number | null;
-  /** Every agent this document ever ran, done agents included — the map is
-   *  the record; there is no separate archive. Bounded by task count. */
-  /** The agent records, as the generic fold keeps them: its value, folded in place, never spelled out here. */
+  /** Every agent this document ever ran, done agents included, as the generic fold keeps them:
+   *  its value, folded in place, never spelled out here. Bounded by task count. */
   roster: AgentRoster;
   /** Research agents in spawn order — drives the column layout. */
   researchAgentIds: number[];
