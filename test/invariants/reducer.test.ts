@@ -113,7 +113,7 @@ test('doc-switch isolation: the run streams into A while B is viewed, untouched'
     { type: 'agent:produce', agentId: 3, text: 'tokens for A', tokenCount: 4 } as WorkflowEvent,
   ], s);
   assert.equal(s.documents.get(B), bBefore); // reference-identical — untouched
-  assert.ok(s.documents.get(A)!.agents.has(3)); // A accrued the stream
+  assert.ok(s.documents.get(A)!.roster.agents.has(3)); // A accrued the stream
   assert.equal(s.activeDocId, B);
   assert.equal(s.runDocId, A);
 });
@@ -196,7 +196,7 @@ test('stragglers: run events with no live run are dropped, never crash', () => {
     { type: 'agent:produce', agentId: 9, text: 'orphan', tokenCount: 1 } as WorkflowEvent,
     { type: 'research:start', agentCount: 1, mode: 'flat' } as WorkflowEvent,
   ], settled());
-  assert.equal(s.documents.get(A)!.agents.size, settled().documents.get(A)!.agents.size);
+  assert.equal(s.documents.get(A)!.roster.agents.size, settled().documents.get(A)!.roster.agents.size);
 });
 
 test('a cold planned query reaches plan_review (the CLI contract)', () => {

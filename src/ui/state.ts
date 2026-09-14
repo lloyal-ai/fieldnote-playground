@@ -45,9 +45,9 @@ export const DOC_PHASES: readonly DocPhase[] = [
 
 /** The agent records are the generic fold's (`@lloyal-labs/ui/fold`): one agent's life on a view, folded from
  *  the bus events every pool emits; this app decides only what a spawn is for. */
-export type { AgentRuntime, TimelineItem, SourceMeta } from '@lloyal-labs/ui/fold';
+export type { AgentRoster, AgentRuntime, TimelineItem, SourceMeta } from '@lloyal-labs/ui/fold';
 export { extractStreamingReport } from '@lloyal-labs/ui/fold';
-import type { AgentRuntime } from '@lloyal-labs/ui/fold';
+import type { AgentRoster, AgentRuntime } from '@lloyal-labs/ui/fold';
 
 export interface Pressure {
   pct: number;
@@ -130,7 +130,8 @@ export interface DocState {
   revision: number | null;
   /** Every agent this document ever ran, done agents included — the map is
    *  the record; there is no separate archive. Bounded by task count. */
-  agents: Map<number, AgentRuntime>;
+  /** The agent records, as the generic fold keeps them: its value, folded in place, never spelled out here. */
+  roster: AgentRoster;
   /** Research agents in spawn order — drives the column layout. */
   researchAgentIds: number[];
   /** Pre-flight recon agents in spawn order — drives the Discovering view. */
@@ -142,9 +143,7 @@ export interface DocState {
   researchSpawnCount: number;
   /** Authoritative fork count from `research:start`. */
   researchAgentCount: number;
-  /** Monotonic counters for stable timeline/label ids within this doc. */
-  nextTimelineId: number;
-  nextLabelIdx: number;
+
   synth: SynthState;
   answer: string | null;
   /** Warm-ask exchanges appended beneath the settled brief. */

@@ -10,6 +10,7 @@ import {
   type AgentRuntime,
   type TimelineItem,
 } from "../../src/ui/state.js";
+import { emptyRoster } from "@lloyal-labs/ui/fold";
 import { BUDGETS } from "../../src/research/budgets.js";
 import type { Pace } from "./pace.js";
 
@@ -31,15 +32,13 @@ const EMPTY_DOC: DocState = Object.freeze({
   phase: "done",
   plan: null,
   revision: null,
-  agents: new Map(),
+  roster: emptyRoster(),
   researchAgentIds: [],
   reconAgentIds: [],
   pendingTaskIndex: null,
   pendingTaskDescription: null,
   researchSpawnCount: 0,
   researchAgentCount: 0,
-  nextTimelineId: 0,
-  nextLabelIdx: 0,
   synth: { open: false, buffer: "", done: false, stats: null },
   answer: null,
   exchanges: [],
@@ -357,7 +356,7 @@ const unescape = (raw: string): string => {
 
 export const selectOutlineDraft = (app: AppState): OutlineDraft | null => {
   if (activeDoc(app).phase !== "planning") return null;
-  const planner = [...activeDoc(app).agents.values()].find((a) => a.endedAt === null);
+  const planner = [...activeDoc(app).roster.agents.values()].find((a) => a.endedAt === null);
   if (!planner) return { settled: [], partial: null };
   const think = planner.timeline.find(
     (t) => t.kind === "think" && t.id === planner.currentThinkId,
@@ -508,7 +507,7 @@ const reportBody = (body: string): string => {
 };
 
 const agentForTask = (app: AppState, index: number): AgentRuntime | null => {
-  for (const a of activeDoc(app).agents.values()) if (a.taskIndex === index) return a;
+  for (const a of activeDoc(app).roster.agents.values()) if (a.taskIndex === index) return a;
   return null;
 };
 
@@ -681,7 +680,7 @@ export const selectMarks = (app: AppState): string[] => {
   if (cited === 1) marks.push("Rests on one source — read it before you lean on it.");
   else if (cited === 2) marks.push("Rests on two sources.");
   let unsettled = 0;
-  for (const a of activeDoc(app).agents.values()) if (a.failReason !== null && a.taskIndex !== null) unsettled += 1;
+  for (const a of activeDoc(app).roster.agents.values()) if (a.failReason !== null && a.taskIndex !== null) unsettled += 1;
   if (unsettled === 1) marks.push("One line of inquiry closed without settling.");
   else if (unsettled > 1) marks.push(`${unsettled} lines of inquiry closed without settling.`);
   return marks;
@@ -709,7 +708,7 @@ export const selectProbes = (app: AppState): Probe[] => {
   const included = selectLibraries(app).filter((l) => l.included);
   const out: Probe[] = [];
   activeDoc(app).reconAgentIds.forEach((id, i) => {
-    const a = activeDoc(app).agents.get(id);
+    const a = activeDoc(app).roster.agents.get(id);
     if (!a) return;
     let searches = 0;
     let found: number | null = null;
@@ -755,7 +754,7 @@ export const selectAsk = (
   const d = activeDoc(app);
   if (d.ask === null) return null;
   const index = (d.plan?.tasks.length ?? 0) + d.exchanges.length;
-  for (const a of d.agents.values()) {
+  for (const a of d.roster.agents.values()) {
     if (a.endedAt === null) {
       return {
         question: d.ask,
@@ -782,7 +781,7 @@ export const selectSourceNotes = (app: AppState): Map<string, string> => {
       }
     }
   };
-  for (const a of activeDoc(app).agents.values()) harvest(a);
+  for (const a of activeDoc(app).roster.agents.values()) harvest(a);
   return notes;
 };
 
@@ -894,7 +893,7 @@ const stepOf = (t: TimelineItem): WorkStep | null =>
  *  identity for exactly as long as the inquiry renders. */
 export const selectWorkFor = (id: number): ((app: AppState) => WorkStep[]) => {
   return (app: AppState): WorkStep[] => {
-    const a = activeDoc(app).agents.get(id);
+    const a = activeDoc(app).roster.agents.get(id);
     if (!a) return [];
     const steps = a.timeline
       .map(stepOf)

@@ -5,9 +5,8 @@
  * `ipc` binding instead of the terminal view), serves the content plane on the
  * `attachment://` scheme, and owns the window.
  */
-import { app, BrowserWindow, ipcMain, utilityProcess } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import { join } from "node:path";
-import { existsSync } from "node:fs";
 import { createEngine, createWindow, registerContentScheme, serveContentScheme, CHANNELS } from "@lloyal-labs/desktop";
 import type { Engine } from "@lloyal-labs/desktop";
 import { reduce, initialState, type AppState } from "../../src/ui/state.js";
@@ -25,12 +24,10 @@ function safeSend(channel: string, payload: unknown): void {
 }
 
 function spawnEngine(): Engine<Command, AppState> {
-  // The engine is THIS project's compiled cli boot (`bin/run.js`), forked with RR_BRIDGE. cwd stays the project
-  // root so the forked cli reads `harness.yml` + `models/`.
-  const bin = join(process.cwd(), "bin", "run.js");
-  if (!existsSync(bin)) throw new Error(`engine not built: ${bin} not found — run \`npm run build\` (or \`npm run dev:desktop\`) first.`);
+  // The engine is THIS project's compiled cli boot; the package forks it, sets the bridge flag and pipes its output.
+  // cwd stays the project root so the forked cli reads `harness.yml` and `models/`.
   return createEngine<WorkflowEvent, Command, AppState>({
-    fork: () => utilityProcess.fork(bin, [], { serviceName: "harness-engine", stdio: "pipe", env: { ...process.env, RR_BRIDGE: "1" } }),
+    bin: join(process.cwd(), "bin", "run.js"),
     initialState,
     reduce,
     forward: (frame) => safeSend(CHANNELS.event, frame),

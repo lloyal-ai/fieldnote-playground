@@ -109,7 +109,7 @@ function View({
   });
 
   // Recon + research agents (skip the tool-less synth agent — taskIndex null).
-  const agents = doc ? [...doc.agents.values()].filter((a) => a.taskIndex !== null) : [];
+  const agents = doc ? [...doc.roster.agents.values()].filter((a) => a.taskIndex !== null) : [];
 
   // The streaming answer: the live synth buffer, else the finalized answer,
   // else the latest exchange's body. The doc is the memory.

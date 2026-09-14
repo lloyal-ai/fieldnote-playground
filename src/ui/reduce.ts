@@ -9,7 +9,7 @@
  * returns the view-ready state.
  */
 
-import { foldAgents } from '@lloyal-labs/ui/fold';
+import { emptyRoster, foldAgents } from '@lloyal-labs/ui/fold';
 import type { AgentRoster, AgentEvent as FoldableAgentEvent } from '@lloyal-labs/ui/fold';
 import type { AppState, SessionState, DocState, DocId, AgentRuntime, SynthState } from './state.js';
 import type { WorkflowEvent } from '../brief/protocol.js';
@@ -36,18 +36,15 @@ function seedParticipation(
 }
 
 /** The agent records live in the roster the generic fold keeps; a document holds one. */
-const rosterOf = (doc: DocState): AgentRoster => ({ agents: doc.agents, nextTimelineId: doc.nextTimelineId, nextLabelIdx: doc.nextLabelIdx });
-const withRoster = (doc: DocState, r: AgentRoster): DocState =>
-  r.agents === doc.agents && r.nextTimelineId === doc.nextTimelineId && r.nextLabelIdx === doc.nextLabelIdx
-    ? doc
-    : { ...doc, agents: r.agents, nextTimelineId: r.nextTimelineId, nextLabelIdx: r.nextLabelIdx };
+/** The fold returns the same roster when an event changed nothing; so does this. */
+const folded = (doc: DocState, r: AgentRoster): DocState => (r === doc.roster ? doc : { ...doc, roster: r });
 
 function replaceAgent(doc: DocState, id: number, patch: (a: AgentRuntime) => AgentRuntime): DocState {
-  const existing = doc.agents.get(id);
+  const existing = doc.roster.agents.get(id);
   if (!existing) return doc;
-  const agents = new Map(doc.agents);
+  const agents = new Map(doc.roster.agents);
   agents.set(id, patch(existing));
-  return { ...doc, agents };
+  return { ...doc, roster: { ...doc.roster, agents } };
 }
 
 // ── the fold ─────────────────────────────────────────────────────
@@ -106,15 +103,13 @@ function newDoc(ev: Extract<WorkflowEvent, { type: 'query' }>): DocState {
     phase: 'planning',
     plan: null,
     revision: null,
-    agents: new Map(),
+    roster: emptyRoster(),
     researchAgentIds: [],
     reconAgentIds: [],
     pendingTaskIndex: null,
     pendingTaskDescription: null,
     researchSpawnCount: 0,
     researchAgentCount: 0,
-    nextTimelineId: 0,
-    nextLabelIdx: 0,
     synth: EMPTY_SYNTH,
     answer: null,
     exchanges: [],
@@ -157,15 +152,13 @@ function settledDoc(ev: Extract<WorkflowEvent, { type: 'doc' }>): DocState {
     phase: 'done',
     plan: null,
     revision: null,
-    agents: new Map(),
+    roster: emptyRoster(),
     researchAgentIds: [],
     reconAgentIds: [],
     pendingTaskIndex: null,
     pendingTaskDescription: null,
     researchSpawnCount: 0,
     researchAgentCount: 0,
-    nextTimelineId: 0,
-    nextLabelIdx: 0,
     synth: EMPTY_SYNTH,
     answer: ev.answer,
     exchanges: ev.exchanges,
@@ -423,15 +416,13 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       return {
         ...doc,
         phase: 'discovering',
-        agents: new Map(),
+        roster: emptyRoster(),
         reconAgentIds: [],
         researchAgentIds: [],
         pendingTaskIndex: null,
         pendingTaskDescription: null,
         researchSpawnCount: 0,
         researchAgentCount: 0,
-        nextTimelineId: 0,
-        nextLabelIdx: 0,
         pipelineResumedAt: Date.now(),
       };
 
@@ -450,15 +441,13 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
         plan: null,
         revision: null,
         mode: ev.mode === 'flat' ? 'flat' : 'deep',
-        agents: new Map(),
+        roster: emptyRoster(),
         reconAgentIds: [],
         researchAgentIds: [],
         pendingTaskIndex: null,
         pendingTaskDescription: null,
         researchSpawnCount: 0,
         researchAgentCount: 0,
-        nextTimelineId: 0,
-        nextLabelIdx: 0,
         pipelineResumedAt: Date.now(),
       };
 
@@ -566,12 +555,12 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       // Pre-flight recon agent: streamed through the same timeline machinery as research (task 0), tracked
       // in reconAgentIds so the research column never picks it up.
       if (doc.phase === 'discovering') {
-        const r = foldAgents(rosterOf(doc), ev, { spawn: () => ({ taskIndex: 0, taskDescription: 'Probing sources' }), terminal: TERMINAL });
-        return withRoster({ ...doc, reconAgentIds: [...doc.reconAgentIds, ev.agentId] }, r);
+        return { ...doc, reconAgentIds: [...doc.reconAgentIds, ev.agentId],
+          roster: foldAgents(doc.roster, ev, { spawn: () => ({ taskIndex: 0, taskDescription: 'Probing sources' }), terminal: TERMINAL }) };
       }
       // Outside research, an agent is tracked without a timeline. An in-flight ask researches while the doc stays 'done'.
       if (doc.phase !== 'research' && !asking) {
-        return withRoster(doc, foldAgents(rosterOf(doc), ev, { spawn: () => ({ taskIndex: null }), terminal: TERMINAL }));
+        return folded(doc, foldAgents(doc.roster, ev, { spawn: () => ({ taskIndex: null }), terminal: TERMINAL }));
       }
       // Research: the spawn names its task (`key: task:<i>`, carried by the pool); a spawn without one falls back to
       // spawn order, as before the key existed. Deep mode's task description arrives on `spine:task` just before.
@@ -595,14 +584,15 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
         description = doc.plan?.tasks[taskIndex]?.description ?? null;
       }
       const dependencyHint = doc.mode === 'deep' && taskIndex > 0 ? `builds on Task ${taskIndex}` : null;
-      const r = foldAgents(rosterOf(doc), ev, { spawn: () => ({ taskIndex, taskDescription: description, dependencyHint }), terminal: TERMINAL });
-      return withRoster({
+      const roster = foldAgents(doc.roster, ev, { spawn: () => ({ taskIndex, taskDescription: description, dependencyHint }), terminal: TERMINAL });
+      return {
         ...doc,
         researchAgentIds: [...doc.researchAgentIds, ev.agentId],
         researchSpawnCount: doc.researchSpawnCount + 1,
         pendingTaskIndex: nextPendingIdx,
         pendingTaskDescription: nextPendingDesc,
-      }, r);
+        roster,
+      };
     }
 
     case 'agent:produce': {
@@ -613,13 +603,13 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       // Planner stream: the outline drafts itself in the view — the planner's grammar JSON accumulates so a
       // renderer can lift task descriptions as they complete (the plan grammar opens no think block).
       if (doc.phase === 'planning') {
-        const planner = doc.agents.get(ev.agentId);
+        const planner = doc.roster.agents.get(ev.agentId);
         if (!planner) return doc;
         return replaceAgent(doc, planner.id, (a) => ({ ...a, tokenCount: ev.tokenCount, contentBuffer: a.contentBuffer + ev.text }));
       }
       // Muted phases. 'discovering' streams like 'research'; an in-flight ask researches under a 'done' doc.
       if (doc.phase !== 'research' && doc.phase !== 'discovering' && !asking) return doc;
-      return withRoster(doc, foldAgents(rosterOf(doc), ev, { terminal: TERMINAL }));
+      return folded(doc, foldAgents(doc.roster, ev, { terminal: TERMINAL }));
     }
 
     case 'agent:tool_call':
@@ -629,7 +619,7 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
     case 'agent:recovered':
     case 'agent:failed':
     case 'agent:done':
-      return withRoster(doc, foldAgents(rosterOf(doc), ev as FoldableAgentEvent, { terminal: TERMINAL }));
+      return folded(doc, foldAgents(doc.roster, ev as FoldableAgentEvent, { terminal: TERMINAL }));
 
     case 'agent:tool_progress':
       return doc;
