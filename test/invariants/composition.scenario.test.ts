@@ -1,0 +1,82 @@
+/**
+ * The plug point is where `app.ts` says it is: the algorithm is handed to the
+ * brief. Two of the five change tests, run as scenarios over the real
+ * composition with one part exchanged: the stock writer with only its settling
+ * stage replaced runs to a settled brief; a replaced planner keeps the stock
+ * review, continuation and library behaviour. Each scenario composes the
+ * harness the way `app.ts` does, with the one line changed.
+ */
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import type { Operation } from "effection";
+import type { Branch } from "@lloyal-labs/sdk";
+import { initializeHarness, useExecution, serveCommands } from "@lloyal-labs/rig";
+import type { PlanResult } from "@lloyal-labs/rig";
+import { settings } from "@lloyal-labs/rig/node";
+import { abilities, config, harness } from "../../src/app.js";
+import { briefs } from "../../src/brief/brief.js";
+import { openLibrary } from "../../src/brief/library.js";
+import type { Command } from "../../src/brief/protocol.js";
+import * as research from "../../src/research/research.js";
+import type { Inputs, Research } from "../../src/research/research.js";
+import { runHarness, docIdOfQuery, accept } from "./harness.js";
+
+const TWO_TASKS = JSON.stringify({ intent: "research", tasks: [{ description: "one" }, { description: "two" }], clarifyQuestions: [] });
+
+/** `app.ts`'s composition with the algorithm exchanged — the one line a developer changes. */
+const composed = (algorithm: Research): typeof harness => function* (ctx, events, commands) {
+  const { session, wire, runner, registry, store } = yield* initializeHarness(ctx, events, { abilities, config });
+  const run = yield* useExecution();
+  const library = yield* openLibrary(() => runner.config().sources.outputDir, { events, registry, wire, run, abilities });
+  const brief = briefs({ session, library, run, wire, config: runner.config, research: algorithm });
+  yield* wire.send({ type: "weights:done" });
+  yield* serveCommands<Command>(commands, [brief, library, settings({ runner, registry, store, wire, run, abilities, config })], { onError: brief.fail });
+};
+
+test("the stock writer with only its settling stage replaced runs to a settled brief", async () => {
+  const settle = function* (_spine: Branch, _ask: Inputs, _plan: PlanResult, found: readonly string[]): Operation<{ answer: string; tokens: number; timeMs: number }> {
+    return { answer: `SETTLED BY HAND: ${found.map((f) => f.trim()).join(" + ")}`, tokens: 0, timeMs: 0 };
+  };
+  const run = await runHarness({
+    harness: composed({ ...research, write: (trunk, ask, plan) => research.write(trunk, ask, plan, { settle }) }),
+    utterances: [
+      { text: TWO_TASKS, kind: "text" },
+      { text: "first finding", kind: "report" },
+      { text: "second finding", kind: "report" },
+    ],
+    script: [
+      { send: { type: "submit_query", query: "Q?", mode: "flat" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
+      { on: (ev) => ev.type === "complete" },
+    ],
+  });
+  assert.equal(run.events.filter((e) => e.type === "synthesize:start").length, 0, "the stock settling pass never ran");
+  assert.equal(run.events.filter((e) => e.type === "research:start").length, 1, "the stock inquiries did");
+  const report = fs.readFileSync(path.join(run.outputDir, docIdOfQuery(run.events), "report.md"), "utf8");
+  assert.match(report, /SETTLED BY HAND: (first finding \+ second finding|second finding \+ first finding)/);
+});
+
+test("a replaced planner keeps the stock review, continuation and library behaviour", async () => {
+  const plan = function* (_trunk: Branch | null, ask: Inputs): Operation<PlanResult> {
+    return { intent: "research", tasks: [{ description: `look into: ${ask.text}` }], clarifyQuestions: [], tokenCount: 0, timeMs: 0 } as PlanResult;
+  };
+  const run = await runHarness({
+    harness: composed({ ...research, plan }),
+    utterances: [{ text: "the finding", kind: "report" }, { text: "The follow-up.", kind: "text" }],
+    script: [
+      { send: { type: "submit_query", query: "Q?", mode: "flat" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
+      { on: (ev) => ev.type === "complete", send: { type: "submit_query", query: "And then?", mode: "flat", skipPlanner: true } },
+      { on: (ev) => ev.type === "complete" },
+    ],
+  });
+  assert.equal(run.events.filter((e) => e.type === "plan:start").length, 1, "the stock planner never ran; the direct ask says its own plan");
+  assert.equal(run.events.filter((e) => e.type === "ui:plan_review").length, 1, "the review is the brief's, kept");
+  const tasks = (run.events.find((e) => e.type === "fanout:tasks") as { tasks: { description: string }[] }).tasks;
+  assert.deepEqual(tasks.map((t) => t.description), ["look into: Q?"]);
+  const dir = path.join(run.outputDir, docIdOfQuery(run.events));
+  assert.ok(fs.existsSync(path.join(dir, "report.md")), "the library kept the brief");
+  assert.equal(fs.readdirSync(dir).filter((f) => /^exchange-\d+\.md$/.test(f)).length, 1, "and the continuation threaded beside it");
+});

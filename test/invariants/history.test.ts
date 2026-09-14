@@ -6,7 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { docIdFromPath, pathFor, installHistory } from "../../targets/web/history.js";
-import type { AppState } from "../../harness/state.js";
+import type { AppState } from "../../src/ui/state.js";
 
 test("a malformed percent escape is an unknown route, not a throw", () => {
   assert.equal(docIdFromPath("/brief/%"), null);

@@ -11,8 +11,8 @@
 import { useSyncExternalStore } from "react";
 import { createStore } from "zustand/vanilla";
 import { useStore } from "zustand";
-import { reduce, initialState, type AppState, type WireStatus } from "../../harness/state.js";
-import type { WorkflowEvent, Command } from "../../harness/protocol.js";
+import { reduce, initialState, type AppState, type WireStatus } from "../../src/ui/state.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 
 export interface Bridge {
   onEvent(cb: (frame: { seq: number; ev: WorkflowEvent }) => void): () => void;

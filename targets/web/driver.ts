@@ -29,9 +29,9 @@ import type { Materialised, ServedHarness, SessionState } from "@lloyal-labs/hos
 import { wss, type WsServerSocket } from "@lloyal-labs/binding/node";
 import type { EventBus } from "@lloyal-labs/binding";
 import type { SessionContext } from "@lloyal-labs/sdk";
-import { createServedContext, createServedChannels } from "../../harness/served-runtime.js";
-import type { WorkflowEvent, Command } from "../../harness/protocol.js";
-import type { Config } from "../../harness/config-types.js";
+import { createServedContext, createServedChannels } from "../_shared/served-runtime.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
+import type { Config } from "../../src/app.js";
 
 type Channels = { uiChannel: EventBus<WorkflowEvent>; commands: Signal<Command, void> };
 
@@ -44,6 +44,8 @@ export interface ServedHostDriverOpts {
   /** Build the per-session context over the resident model. Defaults to this harness's
    *  served factory; a test overrides it with a fake (no model). */
   buildContext?: () => Promise<SessionContext>;
+  /** The resolved vision projector, when the catalog pairs one with the model. */
+  mmprojPath?: string;
 }
 
 export interface ServedHostDriver {
@@ -67,7 +69,7 @@ export function createServedHostDriver(
     // share one bus/command pair. So `pending` holds ONLY not-yet-materialised sessions;
     // the disconnect / terminal paths delete a still-un-claimed entry.
     const pending = new Map<string, Channels>();
-    const buildContext = opts.buildContext ?? (() => createServedContext(cfg));
+    const buildContext = opts.buildContext ?? (() => createServedContext(cfg, { mmprojPath: opts.mmprojPath }));
 
     const served: ServedHarness<SessionContext> = {
       async materialise(sessionId: string): Promise<Materialised<SessionContext>> {

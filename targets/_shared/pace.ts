@@ -5,7 +5,7 @@
  *  pass) and are replaced by what THIS machine actually does: each settled
  *  brief records its wall time, keyed by depth and shape, halved toward
  *  the newest run. */
-import { EFFORT_PRESETS } from "../../harness/effort-presets.js";
+import { BUDGETS } from "../../src/research/budgets.js";
 import type { Depth, Shape } from "./select.js";
 
 export interface Pace {
@@ -26,8 +26,8 @@ const PRIOR: Record<Shape, { perTaskMs: number; synthMs: number }> = {
 };
 
 const depthFactor = (depth: Depth): number =>
-  EFFORT_PRESETS[depth].budget.time.softLimit /
-  EFFORT_PRESETS.medium.budget.time.softLimit;
+  BUDGETS.effort[depth].time.softLimit /
+  BUDGETS.effort.medium.time.softLimit;
 
 interface KV {
   getItem(k: string): string | null;

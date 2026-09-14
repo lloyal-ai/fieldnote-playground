@@ -5,8 +5,8 @@
  * reads `window.harness`, whether that's IPC (desktop) or wss (web).
  */
 import { connectWss, type WssClient } from "@lloyal-labs/binding/web";
-import { initialState, type AppState, type WireStatus } from "../../harness/state.js";
-import type { WorkflowEvent, Command } from "../../harness/protocol.js";
+import { initialState, type AppState, type WireStatus } from "../../src/ui/state.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 
 const DEFAULT_WSS = "ws://127.0.0.1:8787";
 

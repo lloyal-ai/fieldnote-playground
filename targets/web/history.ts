@@ -4,8 +4,8 @@
  *  Both guard on already-matching, so neither can echo the other. The URL
  *  is derived state — a pure projection of the fold's activeDocId with a
  *  command as its only write path. Lifecycle never rides the URL. */
-import type { Command } from "../../harness/protocol.js";
-import type { AppState, DocId } from "../../harness/state.js";
+import type { Command } from "../../src/brief/protocol.js";
+import type { AppState, DocId } from "../../src/ui/state.js";
 
 const DOC_ROUTE = /^\/brief\/([^/]+)$/;
 

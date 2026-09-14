@@ -16,9 +16,9 @@ import React, { useEffect, useReducer, useRef, useState } from "react";
 import { Box, Text, render, useApp, useInput } from "ink";
 import { TextInput } from "@inkjs/ui";
 import type { EventBus } from "@lloyal-labs/binding";
-import { initialState, reduce } from "../../harness/state.js";
-import type { AgentRuntime, AppState } from "../../harness/state.js";
-import type { Command, WorkflowEvent } from "../../harness/protocol.js";
+import { initialState, reduce } from "../../src/ui/state.js";
+import type { AgentRuntime, AppState } from "../../src/ui/state.js";
+import type { Command, WorkflowEvent } from "../../src/brief/protocol.js";
 import { DevOverlay } from "@lloyal-labs/dev-tools/ink";
 import { createPaneModel, foldEvent } from "@lloyal-labs/dev-tools";
 
@@ -95,7 +95,7 @@ function View({
   useEffect(() => {
     if (docPhase === "plan_review" && !acceptedRef.current) {
       acceptedRef.current = true;
-      dispatch({ type: "accept_plan" });
+      dispatch({ type: "accept_plan", revision: doc?.revision ?? 0 });
     }
     if (docPhase !== "plan_review") acceptedRef.current = false;
   }, [docPhase, dispatch]);
@@ -130,7 +130,7 @@ function View({
     const text = q.trim();
     if (!text) return;
     if (doc?.phase === "clarifying") {
-      dispatch({ type: "submit_clarification", answer: text });
+      dispatch({ type: "submit_clarification", revision: doc?.revision ?? 0, answer: text });
     } else {
       // The run mode comes from the loaded config default (`config:loaded`
       // seeds `session.config`); this austere view has no mode toggle.

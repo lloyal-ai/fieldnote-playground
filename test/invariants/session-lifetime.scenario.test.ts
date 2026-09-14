@@ -73,7 +73,8 @@ test("a disconnect during the trunk's image prefill: the decode settles before t
   assert.equal(run.halted, true, "the scenario's halt ended the run");
   assert.equal(seen.disposedDuringHold, 0, "the context was disposed while the decode was still in flight");
   assert.equal(seen.haltSettledDuringHold, false, "the halt resolved before the decode settled");
-  assert.equal(ctx.disposeCount, 1, "teardown disposed the context once the decode had settled");
+  // The harness owns the session; the context is the boot's (or the host's) and is not disposed here.
+  assert.equal(ctx.disposeCount, 0, "the harness never disposes the context it was handed");
   // Nothing past the halted call: no run began, no error toast, no answer.
   const after = run.events.map((e) => e.type).filter((t) => /^(plan|research|spine|agent|answer|complete|ui:error)/.test(t));
   assert.deepEqual(after, [], "the harness carried on past the halted call");

@@ -18,8 +18,8 @@ import { app, BrowserWindow, ipcMain, shell, utilityProcess, type UtilityProcess
 import { join } from "node:path";
 import { existsSync } from "node:fs";
 import type { Descriptor } from "@lloyal-labs/media";
-import { reduce, initialState, type AppState } from "../../harness/state.js";
-import type { WorkflowEvent, Command } from "../../harness/protocol.js";
+import { reduce, initialState, type AppState } from "../../src/ui/state.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 import { registerContentScheme, serveContentScheme } from "./content.js";
 
 // Before app ready, or it is ignored silently — see `./content.ts`.

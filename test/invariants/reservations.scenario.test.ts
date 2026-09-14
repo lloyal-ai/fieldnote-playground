@@ -13,11 +13,13 @@
  */
 import { test, mock } from "node:test";
 import assert from "node:assert/strict";
-import crypto from "node:crypto";
+import { webcrypto } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { runHarness, docIdOfQuery, writeReportFixture } from "./harness.js";
-import type { WorkflowEvent } from "../../harness/protocol.js";
+import {
+  runHarness, docIdOfQuery, writeReportFixture, accept, answer, dirs,
+} from "./harness.js";
+import type { WorkflowEvent } from "../../src/brief/protocol.js";
 
 const PLAN_JSON = JSON.stringify({ intent: "research", tasks: [{ description: "investigate the topic" }], clarifyQuestions: [] });
 const CLARIFY_JSON = JSON.stringify({ intent: "clarify", tasks: [], clarifyQuestions: ["Which one?"] });
@@ -25,7 +27,6 @@ const report = { text: "Findings: alpha.", kind: "report" as const };
 const plan = { text: PLAN_JSON, kind: "text" as const };
 const ask = (query: string) => ({ type: "submit_query", query, mode: "flat", skipPlanner: true }) as const;
 const submit = (query: string) => ({ type: "submit_query", query, mode: "flat" }) as const;
-const dirs = (outputDir: string): string[] => fs.readdirSync(outputDir).filter((n) => fs.statSync(path.join(outputDir, n)).isDirectory()).sort();
 const files = (outputDir: string, docId: string): string[] => fs.readdirSync(path.join(outputDir, docId)).sort();
 
 /** Pin the clock so the timestamp half of the next mint is known. */
@@ -37,8 +38,8 @@ const FRESH = "0f0f0f0f-0000-4000-8000-0000000f0e5";
 test("a collision on mint retries with a fresh identity: the planted document is untouched", async () => {
   mock.timers.enable({ apis: ["Date"], now: FROZEN });
   const uuids = [DUP, FRESH];
-  const real = crypto.randomUUID;
-  mock.method(crypto, "randomUUID", () => uuids.shift() ?? real());
+  const real = webcrypto.randomUUID.bind(webcrypto);
+  mock.method(webcrypto, "randomUUID", () => uuids.shift() ?? real());
   try {
     const planted = `${STAMP}-${DUP}`;
     const run = await runHarness({
@@ -61,8 +62,8 @@ test("a collision on mint retries with a fresh identity: the planted document is
 test("a mint that cannot reserve refuses the submit with nothing changed: no echo, no trunk, the parked plan still there", async () => {
   mock.timers.enable({ apis: ["Date"], now: FROZEN });
   let collide = false;
-  const real = crypto.randomUUID;
-  mock.method(crypto, "randomUUID", () => (collide ? DUP : real()));
+  const real = webcrypto.randomUUID.bind(webcrypto);
+  mock.method(webcrypto, "randomUUID", () => (collide ? DUP : real()));
   try {
     const planted = `${STAMP}-${DUP}`;
     let errors = 0;
@@ -73,7 +74,7 @@ test("a mint that cannot reserve refuses the submit with nothing changed: no ech
         { send: submit("A?") },
         // The plan parks; now every mint collides, and a NEW document is asked for.
         { on: (ev) => { if (ev.type === "ui:plan_review") { collide = true; return true; } return false; }, send: submit("B?") },
-        { on: (ev) => { if (ev.type === "ui:error") errors++; return ev.type === "ui:error"; }, send: () => { collide = false; return { type: "accept_plan" } as const; } },
+        { on: (ev) => { if (ev.type === "ui:error") errors++; return ev.type === "ui:error"; }, send: () => { collide = false; return accept(); } },
         { on: (ev) => ev.type === "complete" },
       ],
     });
@@ -132,10 +133,10 @@ test("a submit over a live run: the abandoned run's end never reaches the new do
     utterances: [plan, { text: "never finishes", kind: "report", stallTokens: 2000 }, plan, report],
     script: [
       { send: submit("A?") },
-      { on: (ev) => ev.type === "ui:plan_review", send: { type: "accept_plan" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
       { on: (ev) => ev.type === "agent:produce", send: submit("B?") },
       { on: (ev) => ev.type === "run:aborted" },
-      { on: (ev) => ev.type === "ui:plan_review", send: { type: "accept_plan" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
       { on: (ev) => ev.type === "complete" },
     ],
   });
@@ -153,7 +154,7 @@ test("a parked plan abandoned by new_run leaves no directory; a rejected attachm
       { send: submit("A?") },
       { on: (ev) => ev.type === "ui:plan_review", send: { type: "new_run" } },
       { on: (ev) => ev.type === "run:aborted", send: submit("B?") },
-      { on: (ev) => ev.type === "ui:plan_review", send: { type: "accept_plan" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
       { on: (ev) => ev.type === "research:start", send: { type: "submit_query", query: "C?", mode: "flat", attachments: [bad] } as unknown as WorkflowEvent as never },
       { on: (ev) => ev.type === "ui:error" },
       { on: (ev) => ev.type === "complete" },
@@ -180,9 +181,9 @@ test("quit while a plan is parked releases the reservation", async () => {
 });
 
 test("a run that dies releases its reservation and announces the death", async () => {
-  // The planner asks to clarify; the commit that parks the question fails on
-  // the trunk. Armed by the clarify plan on the wire, so the pool's own
-  // prefills before it are untouched.
+  // The planner asks to clarify; the round joins the trunk as it is answered,
+  // and that commit fails. Armed by the clarify plan on the wire, so the
+  // pool's own prefills before it are untouched.
   let armed = false;
   const run = await runHarness({
     utterances: [{ text: CLARIFY_JSON, kind: "text" }],
@@ -195,7 +196,8 @@ test("a run that dies releases its reservation and announces the death", async (
     },
     script: [
       { send: submit("A?") },
-      { on: (ev) => { if (ev.type === "plan" && (ev as { intent?: string }).intent === "clarify") armed = true; return ev.type === "run:aborted"; } },
+      { on: (ev) => { if (ev.type === "plan" && (ev as { intent?: string }).intent === "clarify") armed = true; return ev.type === "ui:clarify"; }, send: answer("This one.") },
+      { on: (ev) => ev.type === "run:aborted" },
       { on: (ev) => ev.type === "ui:error" },
     ],
   });

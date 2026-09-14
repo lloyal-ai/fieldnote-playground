@@ -9,8 +9,8 @@ import {
   type DocPhase,
   type AgentRuntime,
   type TimelineItem,
-} from "../../harness/state.js";
-import { EFFORT_PRESETS } from "../../harness/effort-presets.js";
+} from "../../src/ui/state.js";
+import { BUDGETS } from "../../src/research/budgets.js";
 import type { Pace } from "./pace.js";
 
 // ── moments ──────────────────────────────────────────────────────
@@ -30,6 +30,7 @@ const EMPTY_DOC: DocState = Object.freeze({
   runEffort: null,
   phase: "done",
   plan: null,
+  revision: null,
   agents: new Map(),
   researchAgentIds: [],
   reconAgentIds: [],
@@ -195,7 +196,7 @@ export const DEPTHS: readonly { depth: Depth; title: string }[] = [
  *  breadth. Pure: pace arrives as an argument so the seam stays
  *  derivation-only. */
 export const estimateLabel = (depth: Depth, tasks: number | null, pace: Pace): string => {
-  const breadth = EFFORT_PRESETS[depth].maxTasks;
+  const breadth = BUDGETS.effort[depth].maxTasks;
   const n = Math.min(tasks ?? breadth, breadth);
   return `~${Math.max(1, Math.round((pace.perTaskMs * n + pace.synthMs) / 60_000))} min`;
 };
@@ -374,6 +375,9 @@ export const selectOutline = (app: AppState): string[] =>
 
 export const selectReviewing = (app: AppState): boolean =>
   activeDoc(app).phase === "plan_review";
+
+/** The planning round the harness armed; sent back with a yes, an answer or an edit. */
+export const selectRevision = (app: AppState): number => activeDoc(app).revision ?? 0;
 
 /** A follow-up ask is in flight — writing under the settled document. */
 export const selectAskInFlight = (app: AppState): boolean => activeDoc(app).ask !== null;
@@ -637,14 +641,36 @@ export const selectCitations = (app: AppState): Citation[] => {
   return [...byUrl.values()];
 };
 
+/** A list line: an optional bullet or number, then a markdown link, then whatever follows on the line. */
+const LINK_LINE = /^\s*(?:[-*]|\d+\.)?\s*\[[^\]]*\]\([^)]*\)/;
+/** The heading that names the list: "Sources", "References", plain, bold or a markdown heading, with or without a colon. */
+const SOURCES_HEAD = /^(?:#{1,4}\s+|\*\*)?(?:sources|references)(?:\*\*)?\s*:?$/i;
+
 /** The weave (and the synth) end the document with a bare source list —
- *  the sources grid replaces it, so the prose sheds it. Anything that
- *  doesn't match the trailing-list shape is left alone. */
-const TRAILING_SOURCES =
-  /\n(?:#{1,4}\s+|\*\*)?(?:sources|references)(?:\*\*)?\s*:?\s*\n(?:\s*(?:[-*]|\d+\.)?\s*\[[^\]]*\]\([^)]*\)[^\n]*\n?)+\s*$/i;
+ *  the sources grid replaces it, so the prose sheds it. Read from the end a
+ *  line at a time — the list's lines, then the heading that names them — so
+ *  the cost is the body's length; anything not of that shape is left alone.
+ *  (A regex for the same shape backtracked without bound on a reference list
+ *  followed by more text, and pinned the tab on every open of such a brief.) */
+export const shedTrailingSources = (body: string): string => {
+  const lines = body.split("\n");
+  let end = lines.length;
+  while (end > 0 && lines[end - 1].trim() === "") end--;
+  let i = end;
+  let links = 0;
+  while (i > 0 && (LINK_LINE.test(lines[i - 1]) || (links > 0 && lines[i - 1].trim() === ""))) {
+    if (lines[i - 1].trim() !== "") links++;
+    i--;
+  }
+  if (links === 0) return body.trimEnd();
+  while (i > 0 && lines[i - 1].trim() === "") i--;
+  // The heading needs a line above it: a list opening the body is the body, not a trailer.
+  if (i < 2 || !SOURCES_HEAD.test(lines[i - 1].trim())) return body.trimEnd();
+  return lines.slice(0, i - 1).join("\n").trimEnd();
+};
 
 export const selectSettleProse = (app: AppState): string =>
-  (selectAnswer(app)?.body ?? "").replace(TRAILING_SOURCES, "").trimEnd();
+  shedTrailingSources(selectAnswer(app)?.body ?? "");
 
 /** Structural margin marks — facts of the run, never judgments of the
  *  content: how it ended, how much it rests on, what closed unsettled. */

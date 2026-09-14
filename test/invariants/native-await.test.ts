@@ -24,7 +24,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
-const ROOTS = ["harness", "targets"];
+const ROOTS = ["src", "targets"];
 const DECODES =
   "prefill|prefillMultimodal|prefillUser|prefillUserMultimodal|prefillAssistant|commit|commitTurn|promote|retainOnly|dispose|scoreBatch";
 const BARE = new RegExp(String.raw`\b(?:call|until)\(\s*(?:\(\)\s*=>\s*)?(?:[\w.]+\.(?:${DECODES}))\(`, "g");

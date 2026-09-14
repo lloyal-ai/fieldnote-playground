@@ -10,7 +10,10 @@
     "moduleResolution": "Bundler",
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    // `node` too: the brief's vocabulary and the interface's fold name the app's `Config`, a type derived from the
+    // table in `app.ts`, and following that type-only import lands tsc in the app's Node imports. Nothing Node reaches
+    // the bundle — a type import is erased — and the browser bundle's own import check is step 4's.
+    "types": ["vite/client", "node"],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -18,12 +21,19 @@
     "noEmit": true
   },
   "include": [
-    "harness/protocol.ts",
-    "harness/state.ts",
+    "src/brief/protocol.ts",
+    "src/ui/state.ts",
+    "src/ui/reduce.ts",
+    "src/ui/short-path.ts",
+    "src/research/budgets.ts",
+    "src/research/prompts.ts",
+    "types/**/*",
     "targets/_shared/**/*",
     "targets/desktop/view.tsx",
     "targets/web/main.tsx",
     "targets/web/boot.ts",
     "targets/web/web-bridge.ts"
-  ]
+  ],
+  // The served host is Node glue shared by the cli and web boots, not a DOM source.
+  "exclude": ["targets/_shared/served-runtime.ts"]
 }

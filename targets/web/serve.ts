@@ -1,40 +1,25 @@
 /**
  * `bin/serve.js`'s entry — the web target's served-host runner. Stands up a `ws`
- * server that serves N browser Sessions over ONE resident model (the model-runtime
- * host + the wss front door in one process). It's the SAME
- * `harness(ctx, events, commands)` the cli and desktop run — only the binding differs;
- * the browser connects with `connectWss` (see `web-bridge.ts`).
+ * server that serves N browser Sessions over ONE resident model. It's the SAME
+ * `harness(ctx, events, commands)` the cli and desktop run — only the binding
+ * differs; the browser connects with `connectWss` (see `web-bridge.ts`).
  *
- * `npm run serve` builds + starts this; then `npm run dev:web` serves the browser
- * app that talks to it. Loopback + no-auth for local dev — token auth is a
- * front-door concern, deferred.
- *
- * ESBUILT (it injects `runServedSession` → the harness → its `.eta` prompts, so it
- * must bundle with `--loader:.eta=text`, never tsx).
- *
- * The config source is `harness.yml`: `resolveConfig` reads it and resolves
- * the llm + reranker specs to concrete digest-verified `.gguf` paths via
- * rig's `resolveModel` — batteries included, no env vars needed. The serving
- * machinery itself — `createServedHostDriver`, `createModelRuntimeHost`, the
- * `ws` WebSocketServer, the wss per-connection binding, admit/release — is
- * platform substrate this file only composes.
- *
- * LINEAGE: evolved from reasoning.run 0.8.0 (src/serve/main.ts).
+ * ESBUILT (it injects `runServedSession` → the app → its `.eta` prompts).
+ * Loopback and no-auth for local dev; token auth is a front-door concern.
  */
 import { main, suspend, call } from "effection";
-import type { Operation, Signal } from "effection";
+import type { Signal } from "effection";
 import { createServer } from "node:http";
 import { WebSocketServer } from "ws";
 import type { WsServerSocket } from "@lloyal-labs/binding/node";
 import type { EventBus } from "@lloyal-labs/binding";
-import { resolveModel, catalogEntry, createProjectMediaStore, createContentRoutes } from "@lloyal-labs/rig/node";
+import { resolveModel, resolveRuntimeModels, createProjectMediaStore, createContentRoutes, loadYml, runnerConfig } from "@lloyal-labs/rig/node";
 import { createContentIngress, MAX_DOCUMENT_BYTES, DOCUMENT_UPLOAD_TIMEOUT_MS } from "@lloyal-labs/media/node";
 import { createServedHostDriver } from "./driver.js";
-import { runServedSession } from "../../harness/served-session.js";
-import type { WorkflowEvent, Command } from "../../harness/protocol.js";
-import { loadConfig, loadYml } from "../../harness/config.js";
-import type { HarnessYml } from "../../harness/config.js";
-import type { Config, LoadedConfig } from "../../harness/config-types.js";
+import { runServedSession } from "./served-session.js";
+import { config } from "../../src/app.js";
+import type { Config } from "../../src/app.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 
 function envInt(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -44,90 +29,48 @@ function envInt(name: string, fallback: number): number {
 
 // The layered config: cli > env > harness.json > harness.yml > default. A bad
 // manifest fails HERE — before any model fetch or bind.
+const projectRoot = process.cwd();
 const bootEnv = { ...process.env };
-function loadOrExit(): { yml: HarnessYml; loaded: LoadedConfig } {
+function loadOrExit(): ReturnType<typeof runnerConfig<typeof config>> {
   try {
-    const yml = loadYml();
-    return { yml, loaded: loadConfig(yml, {}, bootEnv) };
+    return runnerConfig(config, loadYml(config, projectRoot), { env: bootEnv, cwd: projectRoot });
   } catch (err) {
     process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
 }
-const { yml, loaded } = loadOrExit();
+const loaded = loadOrExit();
+
+const progress = (label: string) => (got: number, total: number): void => {
+  process.stderr.write(`\rfetching ${label} — ${total > 0 ? Math.round((100 * got) / total) : 0}%   `);
+};
 
 /**
  * Resolve the layered config's model specs to concrete digest-verified `.gguf`
- * paths (fetched on first run, no key). A saved `model.path`/`model.reranker`
- * in harness.json outranks the yml catalog id. The served factories read
- * `model.path` (+ `model.nCtx`) for the resident context and `model.reranker`
- * for the per-session cross-encoder.
+ * paths (fetched on first run): the reasoning model with its projector when the
+ * catalog pairs one, and the per-session reranker.
  */
-function* resolveConfig(): Operation<Config> {
-  const modelPath = yield* call(() =>
-    resolveModel({
-      projectRoot: process.cwd(),
-      role: "llm",
-      spec: loaded.config.model.path
-        ? { path: loaded.config.model.path }
-        : { id: yml.model?.llm?.id },
-      onProgress: (got, total) => {
-        const pct = total > 0 ? Math.round((100 * got) / total) : 0;
-        process.stderr.write(`\rfetching ${yml.model?.llm?.id ?? "model"} — ${pct}%   `);
-      },
-    }),
+function* resolveConfig() {
+  const models = yield* call(() =>
+    resolveRuntimeModels({ projectRoot, config: loaded.config.model, llmId: loaded.config.model.id, onProgress: (role, g, t) => progress(role)(g, t) }),
   );
-
   const rerankerPath = yield* call(() =>
     resolveModel({
-      projectRoot: process.cwd(),
+      projectRoot,
       role: "reranker",
-      spec: loaded.config.model.reranker
-        ? { path: loaded.config.model.reranker }
-        : { id: yml.model?.reranker?.id, path: yml.model?.reranker?.path },
-      onProgress: (got, total) => {
-        const pct = total > 0 ? Math.round((100 * got) / total) : 0;
-        process.stderr.write(`\rfetching reranker — ${pct}%   `);
-      },
+      spec: loaded.config.model.reranker ? { path: loaded.config.model.reranker } : { id: loaded.config.model.rerankerId },
+      onProgress: progress("reranker"),
     }),
   );
-
-  // The vision projector, resolved the same way the CLI boot resolves it:
-  // usually implicit (the catalog pairs one with each vision-capable llm), and
-  // simply absent for a text-only model — `supportsVision()` then reports
-  // false rather than the boot failing. Without this the served host runs
-  // text-only no matter what the model can do.
-  const mmprojId =
-    loaded.config.model.mmproj ??
-    (yml.model?.llm?.id ? catalogEntry("llm", yml.model.llm.id)?.mmproj : undefined);
-  const mmprojPath = mmprojId
-    ? yield* call(() =>
-        resolveModel({
-          projectRoot: process.cwd(),
-          role: "mmproj",
-          spec: { id: mmprojId },
-          onProgress: (got, total) => {
-            const pct = total > 0 ? Math.round((100 * got) / total) : 0;
-            process.stderr.write(`\rfetching ${mmprojId} — ${pct}%   `);
-          },
-        }),
-      )
-    : undefined;
-
-  return {
+  const cfg: Config = {
     ...loaded.config,
-    model: {
-      ...loaded.config.model,
-      path: modelPath,
-      reranker: rerankerPath,
-      ...(mmprojPath ? { mmprojPath } : {}),
-      nCtx: loaded.config.model.nCtx ?? 32768,
-    },
+    model: { ...loaded.config.model, path: models.modelPath, reranker: rerankerPath, nCtx: loaded.config.model.nCtx ?? 32768 },
   };
+  return { cfg, mmprojPath: models.mmprojPath };
 }
 
 main(function* () {
-  const cfg = yield* resolveConfig();
+  const { cfg, mmprojPath } = yield* resolveConfig();
   const port = envInt("PORT", 8787);
   const maxNativeSessions = envInt("MAX_SESSIONS", 8);
   // Default to loopback: the pilot is no-auth, and ws's default all-interfaces bind for
@@ -139,16 +82,17 @@ main(function* () {
   // image attached in two browsers is stored once — and the index has a single
   // writer. `process.cwd()` is where `harness.yml` was found (loadYml's
   // contract); if that ever searches upward, this is the one line to change.
-  const media = createProjectMediaStore(process.cwd());
+  const media = createProjectMediaStore(projectRoot);
 
   const driver = yield* createServedHostDriver(cfg, {
     maxNativeSessions,
+    mmprojPath,
     // The host is payload-opaque — it erases the bus/command types to `unknown`. The
     // driver created these channels as WorkflowEvent/Command, so re-narrow them here.
     run: (m) =>
       runServedSession(
         cfg,
-        loaded.origin,
+        { origin: loaded.origin, sessionOriginMap: loaded.sessionOriginMap, frozen: loaded.frozen },
         media,
         ingress,
         m.context,

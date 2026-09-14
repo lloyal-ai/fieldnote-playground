@@ -5,8 +5,8 @@
  * — so the React view is transport-agnostic and both surfaces reuse it.
  */
 import { contextBridge, ipcRenderer } from "electron";
-import type { AppState } from "../../harness/state.js";
-import type { WorkflowEvent, Command } from "../../harness/protocol.js";
+import type { AppState } from "../../src/ui/state.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 
 const api = {
   /** Subscribe to `{ seq, ev }` frames the main process forwards. */

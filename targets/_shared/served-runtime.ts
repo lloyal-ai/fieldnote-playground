@@ -18,8 +18,8 @@ import type { Signal } from "effection";
 import { createContext as createNativeContext } from "@lloyal-labs/lloyal.node";
 import type { SessionContext } from "@lloyal-labs/sdk";
 import { createBus, type EventBus } from "@lloyal-labs/binding";
-import type { WorkflowEvent, Command } from "./protocol.js";
-import type { Config } from "./config-types.js";
+import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
+import type { Config } from "../../src/app.js";
 
 /**
  * Steer the native backend for BOTH the resident model context AND the reranker
@@ -47,7 +47,7 @@ export function applyServedGpuEnv(cfg: Config): void {
  * the model by path, so the Nth call shares the resident weights and only
  * allocates a fresh KV context.
  */
-export function createServedContext(cfg: Config): Promise<SessionContext> {
+export function createServedContext(cfg: Config, resolved: { mmprojPath?: string } = {}): Promise<SessionContext> {
   const modelPath = cfg.model.path;
   if (!modelPath) {
     throw new Error(
@@ -65,7 +65,7 @@ export function createServedContext(cfg: Config): Promise<SessionContext> {
       // Vision, when the boot resolved a projector. `mmprojPath` is already a
       // concrete file — `mmproj` beside it is the catalog id the boot resolved
       // FROM, and is not a path.
-      ...(cfg.model.mmprojPath ? { mmprojPath: cfg.model.mmprojPath } : {}),
+      ...(resolved.mmprojPath ? { mmprojPath: resolved.mmprojPath } : {}),
       ...(cfg.model.imageMinTokens ? { imageMinTokens: cfg.model.imageMinTokens } : {}),
       ...(cfg.model.imageMaxTokens ? { imageMaxTokens: cfg.model.imageMaxTokens } : {}),
     },

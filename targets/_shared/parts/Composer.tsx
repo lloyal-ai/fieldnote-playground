@@ -12,11 +12,11 @@ import { resolveAsset } from "./Figures.js";
 import type { Descriptor } from "@lloyal-labs/media";
 import {
   DEPTHS, SHAPES, estimateLabel, fmtElapsed, selectActiveDocId, selectBanked,
-  selectDepth, selectEtaTasks, selectLibraries, selectLive, selectMoment, selectResumedAt,
+  selectDepth, selectEtaTasks, selectLibraries, selectLive, selectMoment, selectResumedAt, selectRevision,
   type Shape,
 } from "../select.js";
 import { paceFor } from "../pace.js";
-import type { AppState } from "../../../harness/state.js";
+import type { AppState } from "../../../src/ui/state.js";
 
 // Stable identities — the composer re-renders per keystroke, and a fresh
 // inline closure per render would grow the fold's memo map (store contract).
@@ -104,6 +104,7 @@ export function Composer({ shape, placeholder }: {
   const settled = useBrief(selectSettled);
   const activeDocId = useBrief(selectActiveDocId);
   const clarifying = useBrief(selectClarifying);
+  const revision = useBrief(selectRevision);
   // What submit() will actually send — the render gates below share the
   // same truth instead of re-deriving it.
   const willSkipPlanner = settled ? true : shape === "ask";
@@ -259,7 +260,7 @@ export function Composer({ shape, placeholder }: {
     // again and send a second query.
     if (!text || uploading || pending !== null) return;
     if (clarifying) {
-      send({ type: "submit_clarification", answer: text });
+      send({ type: "submit_clarification", revision, answer: text });
       setPending({ text, docId: activeDocId, clarify: true });
       clear();
       return;
@@ -485,7 +486,7 @@ export function Composer({ shape, placeholder }: {
                   aria-checked={d.depth === depth}
                   className="cmp-pill" style={d.depth === depth ? S.depthOn : S.depth}
                   title={pace.observed ? undefined : "estimated — runs on this machine refine it"}
-                  onClick={() => send({ type: "set_effort", effort: d.depth })}
+                  onClick={() => send({ type: "set_config", patch: { defaults: { effort: d.depth } } })}
                 >
                   {d.title} · {estimateLabel(d.depth, tasks, pace)}
                 </button>

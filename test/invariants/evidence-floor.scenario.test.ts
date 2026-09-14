@@ -7,7 +7,9 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { runHarness } from "./harness.js";
+import {
+  runHarness, accept,
+} from "./harness.js";
 
 const PLAN_JSON = JSON.stringify({
   intent: "research",
@@ -25,7 +27,7 @@ test("a research agent that reports before two tool calls is nudged once with th
     ],
     script: [
       { send: { type: "submit_query", query: "Q?", mode: "flat" } },
-      { on: (ev) => ev.type === "ui:plan_review", send: { type: "accept_plan" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
       { on: (ev) => ev.type === "complete" },
     ],
   });

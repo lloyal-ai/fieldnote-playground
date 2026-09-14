@@ -9,7 +9,7 @@ import { color, font, inquiryColor } from "../theme.js";
 import { send, useBrief } from "../store.js";
 import {
   selectClarify, selectDev, selectDiscovering, selectOutline, selectOutlineDraft,
-  selectProbes, selectReviewing, selectTitle, type Probe,
+  selectProbes, selectReviewing, selectRevision, selectTitle, type Probe,
 } from "../select.js";
 import { Work } from "../parts/InquiryRow.js";
 import { Figures } from "../parts/Figures.js";
@@ -81,6 +81,7 @@ function Line({ n, text, live }: { n: number; text: string; live?: boolean }): R
  *  edit holds it. Every gesture dispatches the harness's own plan command —
  *  the view keeps no plan state of its own. */
 function Review({ outline }: { outline: string[] }): ReactElement {
+  const revision = useBrief(selectRevision);   // the round every gesture names; a stale one is refused with a toast
   const [left, setLeft] = useState(START_HOLD_S);
   const [editing, setEditing] = useState<number | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -97,14 +98,14 @@ function Review({ outline }: { outline: string[] }): ReactElement {
   useEffect(() => {
     if (left <= 0 && !accepted.current) {
       accepted.current = true;
-      send({ type: "accept_plan" });
+      send({ type: "accept_plan", revision });
     }
   }, [left]);
 
   const start = (): void => {
     if (accepted.current) return;
     accepted.current = true;
-    send({ type: "accept_plan" });
+    send({ type: "accept_plan", revision });
   };
 
   const beginEdit = (index: number): void => {
@@ -116,18 +117,18 @@ function Review({ outline }: { outline: string[] }): ReactElement {
   const commitEdit = (): void => {
     const text = draftText.trim();
     if (editing !== null && text && text !== outline[editing]) {
-      send({ type: "update_task_description", index: editing, description: text });
+      send({ type: "update_task_description", revision, index: editing, description: text });
     }
     setEditing(null);
   };
 
   const strike = (index: number): void => {
-    send({ type: "delete_task", index });
+    send({ type: "delete_task", revision, index });
     setLeft(START_HOLD_S);
   };
 
   const add = (): void => {
-    send({ type: "add_task", afterIndex: outline.length - 1 });
+    send({ type: "add_task", revision, afterIndex: outline.length - 1 });
     setEditing(outline.length);
     setDraftText("");
     setLeft(START_HOLD_S);

@@ -12,9 +12,13 @@
  * columns, sections, panes — is the renderer's business, not this file's.
  */
 
-import type { Config, ConfigOrigin } from './config-types.js';
+import type { Config } from '../app.js';
 import type { Descriptor } from '@lloyal-labs/media';
-import type { Effort } from './effort-presets.js';
+import type { Effort } from '../research/budgets.js';
+import type { DocId, Mode, LibraryEntry, OpTiming } from '../brief/protocol.js';
+
+export type { DocId, Mode, LibraryEntry, OpTiming } from '../brief/protocol.js';
+export { reduce } from './reduce.js';
 
 /** The view's transport link to the host — a fact of the wire, NOT the
  *  harness fold (the harness never knows if a browser's socket dropped).
@@ -22,12 +26,6 @@ import type { Effort } from './effort-presets.js';
  *  socket dies under a live view. The web bridge reports it; the in-process
  *  cli/desktop bridges never leave 'connected'. */
 export type WireStatus = 'connecting' | 'connected' | 'lost';
-
-/** One document's identity — the SAME string names the fold's DocState, the
- *  browser route (/brief/:docId), and the run-dir folder on disk. ISO-
- *  timestamp shaped (2026-09-02T10-30-00-000): sortable, URL-safe, minted
- *  once by the harness at the query echo. */
-export type DocId = string;
 
 export type SessionPhase = 'boot' | 'ready';
 
@@ -48,24 +46,6 @@ export const DOC_PHASES: readonly DocPhase[] = [
   'planning', 'discovering', 'clarifying', 'plan_review',
   'research', 'synthesizing', 'done',
 ];
-
-/** User-facing reasoning mode. 'deep' == chain-shaped orchestration
- *  (sequential tasks that build on each other); 'flat' == parallel-shaped
- *  orchestration (orthogonal tasks running concurrently). One encoding
- *  everywhere — no 'chain' alias. */
-export type Mode = 'flat' | 'deep';
-
-/** One settled brief on disk — a sidebar library row (`library:list`). */
-export interface LibraryEntry {
-  path: string;
-  /** The identity — the run-dir's basename; keys the route and the fold. */
-  docId: DocId;
-  title: string;
-  savedAt: string;
-  mode: Mode | null;
-  /** The brief carried images — its meta line names their roots. */
-  hasMedia: boolean;
-}
 
 /** One cited source, extracted CONSUMER-side from a tool result (the Ability
  *  Protocol prescribes no result schema). Web tools populate url/title/snippet
@@ -214,13 +194,6 @@ export interface SynthState {
   stats: { tokens: number; toolCalls: number; ppl: number; timeMs: number } | null;
 }
 
-export interface OpTiming {
-  label: string;
-  tokens: number;
-  detail: string;
-  timeMs: number;
-}
-
 export interface Toast {
   message: string;
   tone: 'info' | 'success' | 'warn' | 'error';
@@ -284,6 +257,9 @@ export interface DocState {
     tokenCount: number;
     timeMs: number;
   } | null;
+  /** The planning round the harness armed (`ui:plan_review` / `ui:clarify`); the interface sends it back
+   *  with a yes, an answer or an edit, and a stale one is refused. Null when nothing is parked. */
+  revision: number | null;
   /** Every agent this document ever ran, done agents included — the map is
    *  the record; there is no separate archive. Bounded by task count. */
   agents: Map<number, AgentRuntime>;

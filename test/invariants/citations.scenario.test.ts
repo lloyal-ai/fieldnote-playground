@@ -8,7 +8,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { runHarness, docIdOfQuery } from "./harness.js";
+import { WebSearchTool } from "../../node_modules/@lloyal-labs/web-ability/dist/tools/web-search.js";
+import { runHarness, docIdOfQuery, accept } from "./harness.js";
+import type { Utterance } from "./harness.js";
+
+/** The web, at the tool boundary: a search answers with one result, so an agent can search as long as its turns last. */
+WebSearchTool.prototype.execute = function* (args: { query: string }) {
+  return { results: [{ title: `About ${args.query}`, url: `https://a.io/${args.query}`, snippet: `${args.query}, in brief` }] };
+} as typeof WebSearchTool.prototype.execute;
 
 const PLAN_JSON = JSON.stringify({
   intent: "research",
@@ -28,7 +35,7 @@ test("a voluntary report's sources are woven into its findings: on the wire, and
     ],
     script: [
       { send: { type: "submit_query", query: "Q?", mode: "flat" } },
-      { on: (ev) => ev.type === "ui:plan_review", send: { type: "accept_plan" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
       { on: (ev) => ev.type === "complete" },
     ],
   });
@@ -42,8 +49,31 @@ test("a voluntary report's sources are woven into its findings: on the wire, and
   assert.ok(body.includes("[Oslo](https://a.io/oslo)") && body.includes("Sources:"), "the annexure carries the woven findings");
 });
 
-// A report produced by recovery — an agent dropped at pressure, time or turns and
-// given a forced report turn — is captured without passing through the return
-// position, so its sources are not woven. Step 3 routes recovered calls through
-// the same position as a voluntary return; this law then gets its body.
-test.todo("a recovered report's sources are woven the same way — step 3");
+test("a recovered report's sources are woven the same way — the recovery turn passes through the return position", async () => {
+  // The agent searches on every turn until the pool reaps it at the turn cap; its recovery turn is the report.
+  let recovering = false;
+  let n = 0;
+  const search = (): Utterance => ({
+    text: "", kind: "tool", tool: { name: "web_search", args: { query: `q${++n}` } }, stallTokens: 12,
+    then: () => (recovering ? { text: FINDINGS, kind: "report", sources: SOURCES } : search()),
+  });
+  const run = await runHarness({
+    utterances: [{ text: PLAN_JSON, kind: "text" }, search()],
+    script: [
+      { send: { type: "submit_query", query: "Q?", mode: "flat" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
+      { on: (ev) => ev.type === "research:start" },
+      { on: (ev) => { if (ev.type === "agent:done") recovering = true; return ev.type === "agent:done"; } },
+      { on: (ev) => ev.type === "complete" },
+    ],
+  });
+  assert.equal(run.events.filter((e) => e.type === "agent:return").length, 0, "the agent never returned on its own");
+  const recovered = run.events.filter((e) => e.type === "agent:recovered") as { result: string }[];
+  assert.equal(recovered.length, 1, "one recovered report");
+  assert.equal(recovered[0].result, WOVEN, "woven at capture, the same as a voluntary return");
+  assert.ok(n >= 2, "the agent searched before it was reaped");
+  const dir = path.join(run.outputDir, docIdOfQuery(run.events));
+  const annexures = fs.readdirSync(dir).filter((f) => /^annexure-\d+\.md$/.test(f));
+  assert.equal(annexures.length, 1);
+  assert.ok(fs.readFileSync(path.join(dir, annexures[0]), "utf8").includes("[Oslo](https://a.io/oslo)"), "the annexure carries the woven findings");
+});

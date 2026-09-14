@@ -12,9 +12,9 @@
 import type {
   AppState, SessionState, DocState, DocId, AgentRuntime, TimelineItem,
   SourceMeta, SynthState,
-} from './state-core.js';
-import type { WorkflowEvent } from './events.js';
-import type { Config } from './config-types.js';
+} from './state.js';
+import type { WorkflowEvent } from '../brief/protocol.js';
+import type { Config } from '../app.js';
 import { shortPath } from './short-path.js';
 
 /** Seed/refresh `participation` from current config. The reducer holds NO
@@ -381,7 +381,7 @@ const SCOPE: Partial<Record<WorkflowEvent['type'], Scope>> = {
   // session facts
   'config:loaded': 'session', 'config:updated': 'session',
   'participation:toggled': 'session', 'abilities:state': 'session',
-  'corpus:indexed': 'session', 'weights:label': 'session', 'weights:done': 'session',
+  'corpus:indexed': 'session', 'weights:done': 'session',
   'library:list': 'session', 'library:search': 'session',
   'stats': 'session', 'agent:tick': 'session', // both feed session.pressure
   // the running document
@@ -393,7 +393,7 @@ const SCOPE: Partial<Record<WorkflowEvent['type'], Scope>> = {
   'fanout:tasks': 'run',
   'spine:task': 'run', 'spine:source': 'run', 'spine:task:done': 'run',
   'synthesize:start': 'run', 'synthesize:done': 'run',
-  'answer': 'run', 'complete': 'run', 'ui:plan_review': 'run',
+  'answer': 'run', 'complete': 'run', 'ui:plan_review': 'run', 'ui:clarify': 'run',
   'agent:spawn': 'run', 'agent:produce': 'run', 'agent:tool_call': 'run',
   'agent:tool_retry': 'run', 'agent:tool_result': 'run', 'agent:tool_progress': 'run', 'agent:prefilled': 'run',
   'agent:return': 'run', 'agent:recovered': 'run', 'agent:failed': 'run',
@@ -423,6 +423,7 @@ function newDoc(ev: Extract<WorkflowEvent, { type: 'query' }>): DocState {
     runEffort: ev.effort ?? null,
     phase: 'planning',
     plan: null,
+    revision: null,
     agents: new Map(),
     researchAgentIds: [],
     reconAgentIds: [],
@@ -473,6 +474,7 @@ function settledDoc(ev: Extract<WorkflowEvent, { type: 'doc' }>): DocState {
     runEffort: null,
     phase: 'done',
     plan: null,
+    revision: null,
     agents: new Map(),
     researchAgentIds: [],
     reconAgentIds: [],
@@ -511,6 +513,7 @@ function abortRun(state: AppState): AppState {
       ...doc,
       ask: null,
       askAttachments: [],
+      revision: null,
       synth: { ...doc.synth, open: false },
       paused: false,
       closing: false,
@@ -638,9 +641,6 @@ function sessionReduce(s: SessionState, ev: WorkflowEvent): SessionState {
     case 'abilities:state':
       return { ...s, abilities: ev.abilities };
 
-    case 'weights:label':
-      return { ...s, loadingLabel: ev.label };
-
     case 'weights:done':
       // The session is READY — weights loaded, the picker can submit.
       return { ...s, loadingLabel: null, phase: 'ready' };
@@ -684,7 +684,6 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
     case 'plan':
       return {
         ...doc,
-        phase: ev.intent === 'clarify' ? 'clarifying' : doc.phase,
         plan: {
           intent: ev.intent,
           tasks: ev.tasks,
@@ -767,6 +766,7 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
         ...doc,
         phase: 'planning',
         plan: null,
+        revision: null,
         mode: ev.mode === 'flat' ? 'flat' : 'deep',
         agents: new Map(),
         reconAgentIds: [],
@@ -785,8 +785,12 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       const accrued = doc.pipelineResumedAt
         ? doc.pipelineElapsedMs + (Date.now() - doc.pipelineResumedAt)
         : doc.pipelineElapsedMs;
-      return { ...doc, phase: 'plan_review', pipelineElapsedMs: accrued, pipelineResumedAt: null };
+      return { ...doc, phase: 'plan_review', revision: ev.revision, pipelineElapsedMs: accrued, pipelineResumedAt: null };
     }
+
+    case 'ui:clarify':
+      // The planner asked and the round is armed: the composer takes the answer, at this revision.
+      return { ...doc, phase: 'clarifying', revision: ev.revision };
 
     case 'research:start':
       return {
@@ -856,6 +860,7 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       return {
         ...doc,
         phase: 'done',
+        revision: null,
         paused: false,
         closing: false,
         pipelineElapsedMs: accrued,

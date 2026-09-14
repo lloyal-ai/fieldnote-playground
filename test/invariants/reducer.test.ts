@@ -5,8 +5,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { reduce, initialState, DOC_PHASES, type AppState } from '../../harness/state.js';
-import type { WorkflowEvent } from '../../harness/events.js';
+import { reduce, initialState, DOC_PHASES, type AppState } from '../../src/ui/state.js';
+import type { WorkflowEvent } from '../../src/brief/protocol.js';
 import {
   selectAnswer, selectControls, selectEtaTasks, selectLive, selectMoment, selectReviewing,
   selectRunDepth, selectRunTitle, selectStatus, selectTitle,
@@ -58,6 +58,7 @@ test('idempotence: the second query keeps ONE identity through a clarify re-plan
     { type: 'query', docId: A, query: 'Q1', warm: false } as WorkflowEvent,
     { type: 'plan:start', query: 'Q1', mode: 'flat' } as WorkflowEvent,
     { type: 'plan', intent: 'clarify', tasks: [], clarifyQuestions: ['which?'], tokenCount: 5, timeMs: 50 } as WorkflowEvent,
+    { type: 'ui:clarify', revision: 1 } as WorkflowEvent,
   ]);
   assert.equal(s.documents.get(A)!.phase, 'clarifying');
   const planBefore = s.documents.get(A)!.plan;
