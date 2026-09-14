@@ -9,33 +9,11 @@
  *  order. With `citations` (url → ordinal), a cited link grows its chip;
  *  a link whose whole text is a bare "[1]" collapses into the chip. */
 import { memo, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
-import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
-import remarkGfm from "remark-gfm";
-import remarkMath from "remark-math";
-import rehypeKatex from "rehype-katex";
-import "katex/dist/katex.min.css";
+import { Lightbox, Markdown, useAssets } from "@lloyal-labs/ui";
 import { color, font, radius } from "../theme.js";
 import { anchorsOf, selectThreadDigests } from "../select.js";
 import { useBrief } from "../store.js";
 import { parseAttachmentHref, resolvePrefix } from "../content-urls.js";
-import { Lightbox, useAssets } from "./Figures.js";
-
-/** Math in the document's own face — where that is safe. KaTeX positions
- *  STACKED constructs (fractions, radicals, accents, sized operators and
- *  delimiters) by its own fonts' ink metrics; an inherited face's taller
- *  numerals crash into the fraction bar. So inline runs — the arithmetic a
- *  brief mostly carries — inherit the UI font, while stacked constructs are
- *  excluded and fall back to katex.css's own font rules. */
-const MATH = `
-  .katex { font-size: 1em !important; }
-  .katex, .katex *:not(.delimsizing, .op-symbol) { font-family: inherit !important; }
-  /* Plain math glyphs carry no family class — they inherit from .katex, so
-     excluding them from the override above would still hand them the UI
-     font. Restore KaTeX's face explicitly where geometry needs it. */
-  .katex :is(.mfrac, .sqrt, .root, .accent) * {
-    font-family: KaTeX_Main, "Times New Roman", serif !important;
-  }
-`;
 
 const textOf = (node: ReactNode): string =>
   typeof node === "string" ? node
@@ -71,13 +49,10 @@ export const Prose = memo(function Prose({ markdown: raw, anchorPrefix, citation
     ({ children }: { children?: ReactNode }): ReactElement =>
       <Tag id={anchors[next++]?.anchor} style={HEADING[Tag]}>{children}</Tag>;
   return (
-    <div style={S.prose}>
-      <style>{MATH}</style>
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkMath]}
-        rehypePlugins={[[rehypeKatex, { throwOnError: false }]]}
-        // Unknown schemes are stripped by default; the content plane's own is admitted.
-        urlTransform={(url) => (url.startsWith("attachment://") ? url : defaultUrlTransform(url))}
+    <>
+      <Markdown
+        markdown={markdown}
+        style={S.prose}
         components={{
           a: ({ href, children }) => {
             const ordinal = href ? citations?.get(href) : undefined;
@@ -141,15 +116,20 @@ export const Prose = memo(function Prose({ markdown: raw, anchorPrefix, citation
             ),
           pre: ({ children }) => <pre style={S.pre}>{children}</pre>,
         }}
-      >
-        {markdown}
-      </ReactMarkdown>
+      />
       {openPage !== null && (
-        <Lightbox digest={openPage.digest} label={openPage.label} onClose={() => setOpenPage(null)} />
+        <Lightbox digest={openPage.digest} label={openPage.label} onClose={() => setOpenPage(null)} styles={LIGHTBOX} />
       )}
-    </div>
+    </>
   );
 });
+
+/** The enlarged view in this document's register. */
+export const LIGHTBOX = {
+  full: { maxWidth: "100%", maxHeight: "calc(100vh - 110px)", objectFit: "contain", borderRadius: radius.panel, background: color.card } as CSSProperties,
+  pdf: { width: "min(1100px, 94vw)", height: "calc(100vh - 110px)", border: 0, borderRadius: radius.panel, background: "#fff" } as CSSProperties,
+  caption: { font: `12px ${font.ui}`, color: "#D8D8D2", margin: 0 } as CSSProperties,
+};
 
 const S: Record<string, CSSProperties> = {
   prose: { font: `400 15.5px/1.72 ${font.ui}`, color: color.ink },

@@ -5,7 +5,7 @@
  * imports this to speak the protocol without depending on the harness.
  */
 import type { AgentEvent } from "@lloyal-labs/lloyal-agents";
-import type { HostResourcesEvent } from "@lloyal-labs/dev-tools";
+import type { HostResourcesEvent } from "@lloyal-labs/rig";
 import type { Descriptor } from "@lloyal-labs/media";
 import type { PlanIntent, ResearchTask, RunCommand, SettingsCommand, SettingsEvent } from "@lloyal-labs/rig";
 import type { Config, Origin } from "../app.js";
@@ -190,10 +190,5 @@ export function formatClarifyAsAssistantMsg(questions: readonly string[]): strin
 
 export const errorMessage = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
-/** A one-shot run the harness cannot proceed past: the boot writes `message` and exits `exitCode`. */
-export class HarnessExit extends Error {
-  constructor(message: string, readonly exitCode: number) {
-    super(message);
-    this.name = "HarnessExit";
-  }
-}
+/** A one-shot run the harness could not proceed past — rig's: the boot writes its message and exits with its code. */
+export { HarnessExit } from "@lloyal-labs/rig";

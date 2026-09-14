@@ -12,94 +12,21 @@
  *  A document shows as a card — its title, its page count, its first page —
  *  because what the model was given is its text, and a page image is what the
  *  model looks at only when a tool puts one in front of it. */
-import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
-import { asDocumentMeta, DOCUMENT_CONFIG_TYPE } from "@lloyal-labs/media";
-import type { DocumentMeta } from "@lloyal-labs/media";
+import { useState, type CSSProperties, type ReactElement } from "react";
+import { Lightbox as UiLightbox, pageFacts, resolveAsset, useAssets } from "@lloyal-labs/ui";
+import type { Asset, LightboxProps } from "@lloyal-labs/ui";
 import { color, font, radius, shadow } from "../theme.js";
 import { useBrief } from "../store.js";
 import { selectSeen } from "../select.js";
 import { selectThreadDigests } from "../select.js";
-import { configUrl, contentOrigin, manifestUrl, representationUrl, sourceUrl } from "../content-urls.js";
+import { contentOrigin, representationUrl, sourceUrl } from "../content-urls.js";
+import { LIGHTBOX } from "./Prose.js";
 
-const short = (digest: string): string => digest.replace(/^sha256:/, "").slice(0, 10);
+export { pageFacts, resolveAsset, useAssets };
+export type { Asset };
 
-/** What a root IS, learned from its manifest: a picture, or a document with its sidecar. */
-export type Asset = { kind: "image" } | { kind: "document"; meta: DocumentMeta; /** The ingest retained the original file. */ source: boolean };
-
-/** One resolution per digest for the page's lifetime: content is immutable
- *  under its address, so an answer never goes stale. A root whose manifest
- *  cannot be read is shown as an image — the failure is then visible (a
- *  broken picture) rather than silent. */
-const resolved = new Map<string, Promise<Asset>>();
-export async function resolveAsset(origin: string, digest: string): Promise<Asset> {
-  try {
-    const manifest = (await (await fetch(manifestUrl(origin, digest))).json()) as {
-      config?: { mediaType?: string };
-      layers?: { annotations?: Record<string, string> }[];
-    };
-    if (manifest.config?.mediaType !== DOCUMENT_CONFIG_TYPE) return { kind: "image" };
-    const meta = asDocumentMeta(await (await fetch(configUrl(origin, digest))).json());
-    if (!meta) return { kind: "image" };
-    const source = (manifest.layers ?? []).some((l) => l.annotations?.["ai.lloyal.role"] === "source");
-    return { kind: "document", meta, source };
-  } catch {
-    return { kind: "image" };
-  }
-}
-
-/** "1, 2, 3, 7" with runs of three or more folded: "1–3, 7". */
-function pageList(pages: readonly number[]): string {
-  const out: string[] = [];
-  for (let i = 0; i < pages.length; ) {
-    let j = i;
-    while (j + 1 < pages.length && pages[j + 1] === pages[j] + 1) j++;
-    out.push(j - i >= 2 ? `${pages[i]}–${pages[j]}` : pages.slice(i, j + 1).join(", "));
-    i = j + 1;
-  }
-  return out.join(", ");
-}
-
-/** What of a document reached the model, page by page: which pages had no
- *  text to extract (scanned — the model can only look at them), which were
- *  extracted as text, and — when the thread holds their renders — which pages
- *  the model actually looked at. */
-export function pageFacts(meta: DocumentMeta, viewedRenders: ReadonlySet<string> = new Set()): string[] {
-  const scanned = meta.pages.filter((p) => p.chars === 0).map((p) => p.page);
-  const viewed = meta.pages.filter((p) => p.render && viewedRenders.has(p.render.digest)).map((p) => p.page);
-  const n = meta.pageCount;
-  const lines = [
-    scanned.length === 0
-      ? `Extracted as text: all ${n} page${n === 1 ? "" : "s"}`
-      : scanned.length === n
-        ? `Scanned (image only): all ${n} page${n === 1 ? "" : "s"}`
-        : `Scanned: ${pageList(scanned)} · extracted as text: the rest`,
-  ];
-  if (viewed.length > 0) lines.push(`Viewed as images: ${pageList(viewed)}`);
-  return lines;
-}
-
-/** The kinds of the given roots, filled in as the content plane answers. */
-export function useAssets(digests: readonly string[]): Record<string, Asset> {
-  const origin = contentOrigin();
-  const [assets, setAssets] = useState<Record<string, Asset>>({});
-  const key = digests.join(" ");
-  useEffect(() => {
-    if (origin === null) return;
-    let live = true;
-    for (const digest of key ? key.split(" ") : []) {
-      let p = resolved.get(digest);
-      if (!p) {
-        p = resolveAsset(origin, digest);
-        resolved.set(digest, p);
-      }
-      void p.then((asset) => {
-        if (live) setAssets((prev) => (prev[digest] ? prev : { ...prev, [digest]: asset }));
-      });
-    }
-    return () => { live = false; };
-  }, [origin, key]);
-  return assets;
-}
+/** ui's enlarged view, in this document's register — one for the strip, the run bar's marker and a cited page. */
+export const Lightbox = (props: Omit<LightboxProps, "styles">): ReactElement | null => <UiLightbox {...props} styles={LIGHTBOX} />;
 
 export function Figures(): ReactElement | null {
   const seen = useBrief(selectSeen);
@@ -196,58 +123,6 @@ export function FigureStrip({ digests }: { digests: string[] }): ReactElement | 
   );
 }
 
-/** The full-size view, shared by the figure strip, the run bar's marker and a
- *  cited page in the prose, so there is one enlarged image in the app rather
- *  than three that drift. `digest` is the root of a single image — a photo the
- *  user attached, or a page render the document ingress archived. */
-export function Lightbox({ digest, pdf, dims, label, onClose }: {
-  /** The root of a single image to show — a photo, a page render. */
-  digest?: string;
-  /** Or a PDF to open in the browser's own viewer: the URL the content plane
-   *  serves the original at, optionally at a page (`#page=N` is honoured). */
-  pdf?: string;
-  dims?: string;
-  /** What is being shown, when it is not simply "the attached image". */
-  label?: string;
-  onClose: () => void;
-}): ReactElement | null {
-  const origin = contentOrigin();
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
-  if (origin === null) return null;
-  if (pdf !== undefined) {
-    return (
-      <div style={S.scrim} role="dialog" aria-modal="true" aria-label={label ?? "Attached document"} onClick={onClose}>
-        {/* The viewer keeps its own clicks; the scrim around it closes. */}
-        <iframe src={pdf} title={label ?? "Attached document"} style={S.pdf} onClick={(e) => e.stopPropagation()} />
-        <p style={S.fullCaption}>{label ?? "the attached document"} · the file as attached</p>
-      </div>
-    );
-  }
-  if (digest === undefined) return null;
-  return (
-    <div
-      style={S.scrim}
-      role="dialog"
-      aria-modal="true"
-      aria-label={label ?? "Attached image, full size"}
-      onClick={onClose}
-    >
-      <img src={representationUrl(origin, digest)} alt={label ?? "Attached image, as the model received it"} style={S.full} />
-      <p style={S.fullCaption}>
-        {label ?? "what the model saw"}{dims ? ` · ${dims}` : ""} · {short(digest)}
-      </p>
-    </div>
-  );
-}
-
 const S: Record<string, CSSProperties> = {
   strip: { display: "flex", flexWrap: "wrap", gap: 10, margin: "0 0 6px" },
   figure: {
@@ -291,19 +166,4 @@ const S: Record<string, CSSProperties> = {
   },
   cardMeta: { font: `11px/1.35 ${font.ui}`, color: "rgba(255,255,255,.92)" },
   caption: { font: `12px ${font.ui}`, color: color.dim, margin: "0 0 18px" },
-  scrim: {
-    position: "fixed", inset: 0, zIndex: 50, cursor: "zoom-out",
-    background: "rgba(20,20,22,.82)", display: "flex",
-    flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 12,
-    padding: 32,
-  },
-  full: {
-    maxWidth: "100%", maxHeight: "calc(100vh - 110px)", objectFit: "contain",
-    borderRadius: radius.panel, background: color.card,
-  },
-  pdf: {
-    width: "min(1100px, 94vw)", height: "calc(100vh - 110px)", border: 0,
-    borderRadius: radius.panel, background: "#fff",
-  },
-  fullCaption: { font: `12px ${font.ui}`, color: "#D8D8D2", margin: 0 },
 };

@@ -4,6 +4,7 @@
  *  Both guard on already-matching, so neither can echo the other. The URL
  *  is derived state — a pure projection of the fold's activeDocId with a
  *  command as its only write path. Lifecycle never rides the URL. */
+import type { Projection } from "@lloyal-labs/binding";
 import type { Command } from "../../src/brief/protocol.js";
 import type { AppState, DocId } from "../../src/ui/state.js";
 
@@ -25,10 +26,7 @@ export const pathFor = (docId: DocId | null): string =>
   docId === null ? "/" : `/brief/${encodeURIComponent(docId)}`;
 
 export function installHistory(
-  store: {
-    getState(): { app: AppState };
-    subscribe(cb: (s: { app: AppState }) => void): () => void;
-  },
+  projection: Pick<Projection<AppState>, "getSnapshot" | "subscribe">,
   send: (c: Command) => void,
 ): () => void {
   // URL → fold: the initial deep link and every back/forward is a command;
@@ -37,7 +35,7 @@ export function installHistory(
   // ready; an unknown id toasts and the mirror below settles the URL to '/'.
   const dispatch = (): void => {
     const docId = docIdFromPath(location.pathname);
-    if (docId !== store.getState().app.activeDocId) send({ type: "open_doc", docId });
+    if (docId !== projection.getSnapshot().activeDocId) send({ type: "open_doc", docId });
   };
   dispatch(); // deep link on load
   addEventListener("popstate", dispatch);
@@ -47,8 +45,8 @@ export function installHistory(
   // nothing, so the history stack never gains echo entries. The search and
   // hash ride along: `?server=` and `?content=` are where the bridge finds a
   // remote host on reload, and a document change is not a host change.
-  const unsub = store.subscribe((s) => {
-    const path = pathFor(s.app.activeDocId);
+  const unsub = projection.subscribe((app) => {
+    const path = pathFor(app.activeDocId);
     if (location.pathname !== path) history.pushState(null, "", path + location.search + location.hash);
   });
 

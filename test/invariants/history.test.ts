@@ -31,13 +31,13 @@ test("activating a document keeps the remote endpoints on the URL", () => {
   g.addEventListener = () => {};
   g.removeEventListener = () => {};
   try {
-    let listener: ((s: { app: AppState }) => void) | null = null;
-    const store = {
-      getState: () => ({ app: { activeDocId: null } as AppState }),
-      subscribe: (cb: (s: { app: AppState }) => void) => { listener = cb; return () => { listener = null; }; },
+    let listener: ((app: AppState) => void) | null = null;
+    const projection = {
+      getSnapshot: () => ({ activeDocId: null } as AppState),
+      subscribe: (cb: (app: AppState) => void) => { listener = cb; return () => { listener = null; }; },
     };
-    const unsub = installHistory(store, () => {});
-    listener!({ app: { activeDocId: "2026-01-01T00-00-00-000-0f0f0f0f-0000-4000-8000-000000000000" } as AppState });
+    const unsub = installHistory(projection, () => {});
+    listener!({ activeDocId: "2026-01-01T00-00-00-000-0f0f0f0f-0000-4000-8000-000000000000" } as AppState);
     assert.deepEqual(pushed, [
       "/brief/2026-01-01T00-00-00-000-0f0f0f0f-0000-4000-8000-000000000000?server=wss%3A%2F%2Fh%3A1&content=https%3A%2F%2Fh%3A2#top",
     ]);

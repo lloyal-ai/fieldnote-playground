@@ -141,7 +141,7 @@ export function HarnessApp(): ReactElement {
     const ended = lastRun.current;
     lastRun.current = runDocId;
     if (ended === null || runDocId !== null) return;
-    const { app } = appStore().getState();
+    const app = appStore().getSnapshot();
     const doc = app.documents.get(ended);
     if (!doc || doc.phase !== "done") return;
     const tasks = doc.plan?.tasks.length ?? 0;

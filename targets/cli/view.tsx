@@ -22,7 +22,7 @@ import type { Command, WorkflowEvent } from "../../src/brief/protocol.js";
 import { DevOverlay } from "@lloyal-labs/dev-tools/ink";
 import { createPaneModel, foldEvent } from "@lloyal-labs/dev-tools";
 
-const seed = (bootstrap: WorkflowEvent[]): AppState =>
+const seed = (bootstrap: readonly WorkflowEvent[]): AppState =>
   bootstrap.reduce(reduce, initialState);
 
 const glyph = (p: AgentRuntime["phase"]): string =>
@@ -56,7 +56,7 @@ function View({
 }: {
   bus: EventBus<WorkflowEvent>;
   dispatch: (c: Command) => void;
-  bootstrap: WorkflowEvent[];
+  bootstrap: readonly WorkflowEvent[];
 }): React.ReactElement {
   const [state, apply] = useReducer(reduce, bootstrap, seed);
   const app = useApp();
@@ -210,7 +210,7 @@ function View({
 export function renderCli(
   bus: EventBus<WorkflowEvent>,
   dispatch: (c: Command) => void,
-  bootstrap: WorkflowEvent[],
+  bootstrap: readonly WorkflowEvent[],
 ): () => void {
   const instance = render(<View bus={bus} dispatch={dispatch} bootstrap={bootstrap} />);
   return () => instance.unmount();

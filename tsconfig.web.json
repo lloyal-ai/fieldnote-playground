@@ -33,7 +33,5 @@
     "targets/web/main.tsx",
     "targets/web/boot.ts",
     "targets/web/web-bridge.ts"
-  ],
-  // The served host is Node glue shared by the cli and web boots, not a DOM source.
-  "exclude": ["targets/_shared/served-runtime.ts"]
+  ]
 }

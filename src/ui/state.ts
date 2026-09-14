@@ -20,12 +20,8 @@ import type { DocId, Mode, LibraryEntry, OpTiming } from '../brief/protocol.js';
 export type { DocId, Mode, LibraryEntry, OpTiming } from '../brief/protocol.js';
 export { reduce } from './reduce.js';
 
-/** The view's transport link to the host — a fact of the wire, NOT the
- *  harness fold (the harness never knows if a browser's socket dropped).
- *  'connecting' at load, 'connected' once the host is ready, 'lost' when the
- *  socket dies under a live view. The web bridge reports it; the in-process
- *  cli/desktop bridges never leave 'connected'. */
-export type WireStatus = 'connecting' | 'connected' | 'lost';
+/** The view's transport link to the host — a fact of the wire, not the fold; binding's word. */
+export type { WireStatus } from '@lloyal-labs/binding';
 
 export type SessionPhase = 'boot' | 'ready';
 
@@ -47,139 +43,11 @@ export const DOC_PHASES: readonly DocPhase[] = [
   'research', 'synthesizing', 'done',
 ];
 
-/** One cited source, extracted CONSUMER-side from a tool result (the Ability
- *  Protocol prescribes no result schema). Web tools populate url/title/snippet
- *  today; image (og:image) + icon (favicon) arrive once the web ability ≥1.2.0
- *  emits them. Ability-agnostic — corpus/other abilities fill whatever subset applies. */
-export interface SourceMeta {
-  url?: string;
-  title?: string;
-  snippet?: string;
-  /** og:image URL (or a local cache ref once the engine inlines it). */
-  image?: string;
-  /** favicon URL. */
-  icon?: string;
-  /** Display host, derived from url when present. */
-  host?: string;
-}
-
-/** Per-agent chronological stream item — a renderer lays one component per
- *  kind. `live: true` on a think item means its body is currently
- *  streaming tokens and should render with a `▎` cursor. */
-export type TimelineItem =
-  | {
-      kind: 'think';
-      id: number;
-      title: string;
-      body: string;
-      live: boolean;
-      openedAt: number;
-      closedAt: number | null;
-    }
-  | {
-      kind: 'tool_call';
-      id: number;
-      tool: string;
-      argsSummary: string;
-    }
-  | {
-      kind: 'tool_result';
-      id: number;
-      tool: string;
-      /** Optional back-reference to the tool_call id this result pairs with.
-       *  Column renderer indents results under their matching call. */
-      callId: number | null;
-      byteLength: number;
-      preview: string | null;
-      hosts: string[];
-      resultCount: number | null;
-      /** Per-source citation metadata extracted from the tool's (free-form)
-       *  result — the Ability Protocol prescribes no result schema, so this is a
-       *  CONSUMER-side convention parsed in summarizeResult from known tool
-       *  shapes (web_search/fetch_page already return url+title+snippet;
-       *  fetch_page additionally emits og:image + favicon once web ≥1.2.0).
-       *  Drives the per-page rows in the Sources ledger. Empty/undefined for
-       *  tools that surface no per-source data (grep, corpus search). */
-      sources?: SourceMeta[];
-    }
-  | {
-      kind: 'report';
-      id: number;
-      body: string;
-      tokenCount: number;
-    };
-
-export interface AgentRuntime {
-  id: number;
-  label: string;                          // "A0", "A1", …
-  phase: 'idle' | 'thinking' | 'content' | 'tool' | 'done' | 'failed';
-  tokenCount: number;
-  toolCallCount: number;
-  /** Wall-clock spawn time (ms) — start of this task's elapsed timer. */
-  startedAt: number;
-  /** Wall-clock completion time (ms), set when the agent reaches `done`
-   *  (agent:return / agent:recovered). Null while running. Elapsed =
-   *  (endedAt ?? now) − startedAt. */
-  endedAt: number | null;
-  /** Research task index this agent was spawned for. Null for synth. */
-  taskIndex: number | null;
-  /** Short task description, used in the column header when present. */
-  taskDescription: string | null;
-  /** Chain-mode dependency hint ("builds on Task 1"), shown in header. */
-  dependencyHint: string | null;
-  /** Id of the currently-live think item in `timeline`, or null. */
-  currentThinkId: number | null;
-  /** Id of the most recent tool_call, paired with its tool_result when one lands. */
-  pendingToolCallId: number | null;
-  /** Live park-and-retry state for the pending tool call (rate-limited
-   *  provider; pool re-executes after the delay). Set on agent:tool_retry,
-   *  cleared when the eventual tool_result lands. Renders as
-   *  "rate-limited — retrying in ~Ns" so a waiting agent never reads as
-   *  hung. */
-  retry: { tool: string; retryAt: number; attempt: number } | null;
-  /** Live post-</think> token buffer. Tokens stream into this between
-   *  closing a think block and the next agent:tool_call / agent:report
-   *  (the model is writing tool-call JSON — the terminal `report` tool's body
-   *  lives inside that JSON, between `<parameter=result>` and `</parameter>`,
-   *  raw and unescaped). Renderers extract the live report body straight from
-   *  this buffer via `extractStreamingReport` below — same marker-delimited
-   *  technique the think block uses with `</think>`. Cleared
-   *  on tool_call / report (those fire structured items instead). */
-  contentBuffer: string;
-  /** True while the agent is being force-recovered: `agent:done` fired (the
-   *  agent stalled without a voluntary report) and `recoverInline` is streaming
-   *  a forced report under an EAGER report grammar (no `<think>`/`</think>`).
-   *  Routes those `agent:produce` tokens into `contentBuffer` (→ "Writing
-   *  report") instead of a think block, so a recovered report isn't mislabeled
-   *  as the agent "Thinking". Set on `agent:done`, cleared on
-   *  `agent:return`/`agent:recovered`. */
-  recovering: boolean;
-  /** Set when the agent's forced recovery FAILED (e.g. KV exhausted mid-report
-   *  decode → `llama_decode failed`): no result was produced. Drives the terminal
-   *  failure glyph (a cross) + frozen timer instead of an eternal "Writing report"
-   *  spinner. Set on `agent:failed`; null otherwise. */
-  failReason: string | null;
-  /** Per-agent chronological stream. */
-  timeline: TimelineItem[];
-}
-
-/** Live report markdown from a raw Hermes terminal-tool buffer:
- *  `…<parameter=result>\n<markdown>\n</parameter>…`. Raw <parameter> values are
- *  unescaped, so no decoding — same idea as streaming a think block until </think>.
- *  Returns the body (to the close marker, or buffer tail if not arrived), or null.
- *  Null until the open marker arrives — that gating is what keeps non-terminal
- *  tool-call args (search queries, URLs) from flashing as report prose. Callers
- *  branch on `recovering` first: a forced recovery streams raw prose with no
- *  envelope, so the buffer is used verbatim there. */
-export function extractStreamingReport(buffer: string): string | null {
-  const OPEN = '<parameter=result>';
-  const i = buffer.indexOf(OPEN);
-  if (i === -1) return null;
-  let body = buffer.slice(i + OPEN.length);
-  const c = body.indexOf('</parameter>');
-  if (c !== -1) body = body.slice(0, c);
-  return body.replace(/^\n/, '');
-}
+/** The agent records are the generic fold's (`@lloyal-labs/ui/fold`): one agent's life on a view, folded from
+ *  the bus events every pool emits; this app decides only what a spawn is for. */
+export type { AgentRuntime, TimelineItem, SourceMeta } from '@lloyal-labs/ui/fold';
+export { extractStreamingReport } from '@lloyal-labs/ui/fold';
+import type { AgentRuntime } from '@lloyal-labs/ui/fold';
 
 export interface Pressure {
   pct: number;

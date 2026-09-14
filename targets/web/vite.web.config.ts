@@ -24,13 +24,18 @@ export default defineConfig({
       "/v1/content": { target: "http://127.0.0.1:8787", changeOrigin: true },
     },
   },
-  // LOCAL-LINK ONLY — not part of the template. `@lloyal-labs/binding` ships
-  // CommonJS; Vite pre-bundles CJS from node_modules but skips linked packages,
-  // so a `file:` link delivers raw CJS to the browser and its named exports
-  // vanish ("does not provide an export named 'connectWss'"). Forcing it into
-  // dep-optimization restores the behaviour an installed copy gets.
-  // `@lloyal-labs/media` for the same reason: the view now reads a document's
-  // sidecar through its root entry (`asDocumentMeta`, `DOCUMENT_CONFIG_TYPE`).
+  // LOCAL-LINK ONLY — not part of the template. Our `@lloyal-labs/*` packages
+  // ship CommonJS. Vite gives an INSTALLED CJS dependency named-export interop
+  // automatically, but a symlinked one resolves to its real path outside this
+  // project, where neither the dev pre-bundler nor the build's commonjs plugin
+  // looks — so its named exports vanish ("does not provide an export named
+  // 'createBridge'"). Keeping the symlinked path puts them back under
+  // `node_modules/`, where both stages treat them like any installed package.
+  // It also makes `@lloyal-labs/ui` resolve ITS react peer through this
+  // project, so the app and the package share one React rather than two.
+  resolve: { preserveSymlinks: true },
+  // Dev-server pre-bundling for the same packages. `optimizeDeps` covers the
+  // dev server only; the line above is what makes `build:web` work too.
   optimizeDeps: { include: ["@lloyal-labs/binding/web", "@lloyal-labs/media"] },
   build: { outDir: resolve(__dirname, "../../dist-web"), emptyOutDir: true },
 });

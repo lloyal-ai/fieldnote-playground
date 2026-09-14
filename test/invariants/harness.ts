@@ -42,12 +42,11 @@ import type { SessionContext } from "@lloyal-labs/sdk";
 import { createBus } from "@lloyal-labs/binding";
 import { RerankerCtx } from "@lloyal-labs/lloyal-agents";
 import type { Reranker, TraceWriter, TraceEvent } from "@lloyal-labs/lloyal-agents";
-import { makeServedRunner, RunnerCtx } from "@lloyal-labs/rig";
+import { bufferedCommandSignal, makeServedRunner, RunnerCtx } from "@lloyal-labs/rig";
 import { runnerConfig } from "@lloyal-labs/rig/node";
 import type { AttachmentStore } from "@lloyal-labs/media";
 import { harness, config } from "../../src/app.js";
 import type { Config, Origin } from "../../src/app.js";
-import { bufferedCommandSignal } from "../../targets/_shared/served-runtime.js";
 import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 
 const STOP = 999;

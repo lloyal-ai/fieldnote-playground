@@ -9,13 +9,15 @@
  * returns the view-ready state.
  */
 
-import type {
-  AppState, SessionState, DocState, DocId, AgentRuntime, TimelineItem,
-  SourceMeta, SynthState,
-} from './state.js';
+import { foldAgents } from '@lloyal-labs/ui/fold';
+import type { AgentRoster, AgentEvent as FoldableAgentEvent } from '@lloyal-labs/ui/fold';
+import type { AppState, SessionState, DocState, DocId, AgentRuntime, SynthState } from './state.js';
 import type { WorkflowEvent } from '../brief/protocol.js';
 import type { Config } from '../app.js';
 import { shortPath } from './short-path.js';
+
+/** This harness's terminal tool: its call ends the turn and is no timeline row. */
+const TERMINAL = 'report';
 
 /** Seed/refresh `participation` from current config. The reducer holds NO
  *  per-ability knowledge: abilities default to included via the `!== false`
@@ -33,339 +35,19 @@ function seedParticipation(
   return prev;
 }
 
-const THINK_CLOSE = '</think>';
+/** The agent records live in the roster the generic fold keeps; a document holds one. */
+const rosterOf = (doc: DocState): AgentRoster => ({ agents: doc.agents, nextTimelineId: doc.nextTimelineId, nextLabelIdx: doc.nextLabelIdx });
+const withRoster = (doc: DocState, r: AgentRoster): DocState =>
+  r.agents === doc.agents && r.nextTimelineId === doc.nextTimelineId && r.nextLabelIdx === doc.nextLabelIdx
+    ? doc
+    : { ...doc, agents: r.agents, nextTimelineId: r.nextTimelineId, nextLabelIdx: r.nextLabelIdx };
 
-/** First meaningful line of a think-block body, cleaned up for a title. */
-function extractTitle(body: string): string {
-  const text = body
-    .replace(/^\s*\n/, '')
-    .replace(/\*\*/g, '')
-    .replace(/^#+\s*/, '')
-    .trim();
-  if (!text) return 'Thinking…';
-  const firstLine = text.split('\n')[0].trim();
-  const clipped = firstLine.length > 72 ? firstLine.slice(0, 72).trimEnd() + '…' : firstLine;
-  return clipped;
-}
-
-function hostOf(url: string): string {
-  try {
-    const u = new URL(url);
-    return u.hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
-/** Best-effort argsSummary for tool_call rendering. One-liners per tool. */
-function formatArgSummary(tool: string, rawArgs: string): string {
-  let parsed: Record<string, unknown>;
-  try { parsed = JSON.parse(rawArgs); } catch { parsed = {}; }
-  const q = typeof parsed.query === 'string' ? parsed.query
-    : typeof parsed.pattern === 'string' ? parsed.pattern
-    : typeof parsed.url === 'string' ? parsed.url
-    : typeof parsed.filename === 'string' ? parsed.filename
-    : '';
-  return q ? `"${q.length > 48 ? q.slice(0, 48) + '…' : q}"` : '';
-}
-
-/** Best-effort per-tool summary used by the column's ToolResult line. The
- *  `sources` field carries per-page citation metadata for the Sources ledger —
- *  extracted consumer-side from the tool's free-form result (the Ability Protocol
- *  prescribes no result schema). web_search/fetch_page already return
- *  url+title+snippet; image/icon (og:image + favicon) populate once the web ability
- *  ≥1.2.0 emits them. */
-function summarizeResult(tool: string, raw: string): {
-  summary: string;
-  hosts: string[];
-  resultCount: number | null;
-  preview: string | null;
-  sources?: SourceMeta[];
-} {
-  // Try JSON parse first — structured tools (web_search, search, grep, plan).
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (tool === 'web_search' && Array.isArray(parsed)) {
-      const items = parsed as {
-        url?: string;
-        title?: string;
-        snippet?: string;
-        image?: string;
-        icon?: string;
-      }[];
-      const hosts = Array.from(
-        new Set(items.map((i) => (i.url ? hostOf(i.url) : '')).filter(Boolean)),
-      ).slice(0, 3);
-      // Per-page citations (url+title+snippet are already returned; image/icon
-      // arrive with web ≥1.2.0). Cap to keep the envelope small.
-      const sources: SourceMeta[] = items
-        .filter((i) => i.url || i.title)
-        .slice(0, 8)
-        .map((i) => ({
-          url: i.url,
-          title: i.title,
-          snippet: i.snippet,
-          image: i.image,
-          icon: i.icon,
-          host: i.url ? hostOf(i.url) : undefined,
-        }));
-      return {
-        summary: `${items.length} results`,
-        hosts,
-        resultCount: items.length,
-        preview: items[0]?.title ?? null,
-        sources: sources.length ? sources : undefined,
-      };
-    }
-    // Corpus semantic search → { hits: [{ file, heading, score }], … }. Each hit
-    // is a local source (a file/section); emit per-hit metadata into `sources`
-    // so the ledger surfaces corpus sources exactly like web pages. The ledger
-    // is Ability-Protocol-agnostic — it keys off `sources[]`, not the ability/tool name.
-    if (
-      tool === 'search' &&
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      Array.isArray((parsed as { hits?: unknown }).hits)
-    ) {
-      const hits = (parsed as { hits: { file?: string; heading?: string }[] }).hits;
-      const sources: SourceMeta[] = hits
-        .slice(0, 8)
-        .map((h) => ({ title: h.heading || h.file, host: h.file }))
-        .filter((s) => s.title || s.host);
-      return {
-        summary: `${hits.length} results`,
-        hosts: [],
-        resultCount: hits.length,
-        preview: hits[0]?.heading ?? hits[0]?.file ?? null,
-        sources: sources.length ? sources : undefined,
-      };
-    }
-    // Corpus grep → { totalMatches, matches: [{ file, line, text }] }. One local
-    // source per matching file, the matched line as the snippet.
-    if (tool === 'grep' && typeof parsed === 'object' && parsed !== null) {
-      const r = parsed as {
-        totalMatches?: number;
-        matches?: { file?: string; line?: number; text?: string }[];
-      };
-      const matches = r.matches ?? [];
-      const sources: SourceMeta[] = matches
-        .slice(0, 8)
-        .map((m) => ({
-          title: m.file,
-          host: m.line != null ? `line ${m.line}` : undefined,
-          snippet: m.text,
-        }))
-        .filter((s) => s.title);
-      return {
-        summary: `${r.totalMatches ?? 0} matches`,
-        hosts: [],
-        resultCount: r.totalMatches ?? null,
-        preview: matches[0]?.file ?? null,
-        sources: sources.length ? sources : undefined,
-      };
-    }
-    // Corpus read_file → { file, content, lines } (or { file, note }). The agent
-    // opened this file: one local source, marked via the fetch-tool name so the
-    // ledger tiers it as "featured" (read closely) rather than merely surveyed.
-    if (tool === 'read_file' && typeof parsed === 'object' && parsed !== null) {
-      const r = parsed as { file?: string; error?: string };
-      if (r.error) return { summary: r.error, hosts: [], resultCount: null, preview: null };
-      const sources: SourceMeta[] = r.file ? [{ title: r.file }] : [];
-      return {
-        summary: `${raw.length}b`,
-        hosts: [],
-        resultCount: null,
-        preview: r.file ?? null,
-        sources: sources.length ? sources : undefined,
-      };
-    }
-    if (
-      (tool === 'fetch_page' || tool === 'web_fetch') &&
-      typeof parsed === 'object' &&
-      parsed !== null
-    ) {
-      const r = parsed as {
-        url?: string;
-        title?: string;
-        error?: string;
-        excerpt?: string;
-        image?: string;
-        icon?: string;
-      };
-      if (r.error) return { summary: r.error, hosts: [], resultCount: null, preview: null };
-      const hosts = r.url ? [hostOf(r.url)] : [];
-      // A fetched page is one rich citation: title + excerpt as the snippet,
-      // plus og:image + favicon once the web ability emits them (web ≥1.2.0).
-      const sources: SourceMeta[] | undefined =
-        r.url || r.title
-          ? [
-              {
-                url: r.url,
-                title: r.title,
-                snippet: r.excerpt,
-                image: r.image,
-                icon: r.icon,
-                host: r.url ? hostOf(r.url) : undefined,
-              },
-            ]
-          : undefined;
-      return {
-        summary: `${raw.length}b`,
-        hosts,
-        resultCount: null,
-        preview: r.title ?? null,
-        sources,
-      };
-    }
-  } catch {
-    /* fall through to URL-scan fallback */
-  }
-
-  // Fallback: scrape hosts from raw URLs in the result payload.
-  const urls = Array.from(raw.matchAll(/https?:\/\/[^\s\])>"]+/g)).map((m) => m[0]);
-  if (urls.length > 0) {
-    const hosts = Array.from(new Set(urls.map(hostOf))).slice(0, 3);
-    return {
-      summary: `${urls.length} links`,
-      hosts,
-      resultCount: urls.length,
-      preview: null,
-    };
-  }
-
-  return { summary: `${raw.length}b`, hosts: [], resultCount: null, preview: null };
-}
-
-// ── Immutable-update helpers ────────────────────────────────────
-
-function replaceAgent(
-  doc: DocState,
-  id: number,
-  patch: (a: AgentRuntime) => AgentRuntime,
-): DocState {
+function replaceAgent(doc: DocState, id: number, patch: (a: AgentRuntime) => AgentRuntime): DocState {
   const existing = doc.agents.get(id);
   if (!existing) return doc;
   const agents = new Map(doc.agents);
   agents.set(id, patch(existing));
   return { ...doc, agents };
-}
-
-function createAgent(doc: DocState, id: number, patch: Partial<AgentRuntime> = {}): DocState {
-  if (doc.agents.has(id)) return doc;
-  const base: AgentRuntime = {
-    id,
-    label: `A${doc.nextLabelIdx}`,
-    phase: 'idle',
-    startedAt: Date.now(),
-    endedAt: null,
-    tokenCount: 0,
-    toolCallCount: 0,
-    taskIndex: null,
-    taskDescription: null,
-    dependencyHint: null,
-    currentThinkId: null,
-    pendingToolCallId: null,
-    retry: null,
-    contentBuffer: '',
-    recovering: false,
-    failReason: null,
-    timeline: [],
-    ...patch,
-  };
-  const agents = new Map(doc.agents);
-  agents.set(id, base);
-  return { ...doc, agents, nextLabelIdx: doc.nextLabelIdx + 1 };
-}
-
-function pushTimeline(agent: AgentRuntime, item: TimelineItem): AgentRuntime {
-  return { ...agent, timeline: [...agent.timeline, item] };
-}
-
-function updateTimeline(
-  agent: AgentRuntime,
-  id: number,
-  update: (item: TimelineItem) => TimelineItem,
-): AgentRuntime {
-  return {
-    ...agent,
-    timeline: agent.timeline.map((it) => (it.id === id ? update(it) : it)),
-  };
-}
-
-/** Open a new live think block on this agent. */
-function openThink(doc: DocState, agentId: number): DocState {
-  const id = doc.nextTimelineId;
-  const next = replaceAgent(doc, agentId, (a) =>
-    pushTimeline({ ...a, currentThinkId: id, phase: 'thinking' }, {
-      kind: 'think',
-      id,
-      title: 'Thinking…',
-      body: '',
-      live: true,
-      openedAt: Date.now(),
-      closedAt: null,
-    }),
-  );
-  return { ...next, nextTimelineId: doc.nextTimelineId + 1 };
-}
-
-/** Close the agent's currently-live think block with finalBody. */
-function closeThink(doc: DocState, agentId: number, finalBody: string): DocState {
-  const agent = doc.agents.get(agentId);
-  if (!agent || agent.currentThinkId === null) return doc;
-  const thinkId = agent.currentThinkId;
-  const title = extractTitle(finalBody);
-  return replaceAgent(doc, agentId, (a) =>
-    updateTimeline({ ...a, currentThinkId: null, phase: 'content' }, thinkId, (it) =>
-      it.kind === 'think'
-        ? { ...it, body: finalBody, title, live: false, closedAt: Date.now() }
-        : it,
-    ),
-  );
-}
-
-/** Close any live think block, keeping whatever body it holds — the
- *  recovery and tool-call paths may reach here without a `</think>`. */
-function closeLiveThink(doc: DocState, agentId: number): DocState {
-  const agent = doc.agents.get(agentId);
-  if (!agent || agent.currentThinkId === null) return doc;
-  const item = agent.timeline.find((it) => it.id === agent.currentThinkId);
-  const finalBody = item && item.kind === 'think' ? item.body : '';
-  return closeThink(doc, agentId, finalBody);
-}
-
-/** Advance the agent's live think block with freshly-produced text: append
- *  until `</think>` arrives, then close on the marker and seed contentBuffer
- *  with the tail so no token is lost at the boundary. */
-function advanceThink(
-  doc: DocState,
-  agentId: number,
-  text: string,
-  tokenCount: number,
-): DocState {
-  const agent = doc.agents.get(agentId);
-  if (!agent || agent.currentThinkId === null) return doc;
-  const thinkId = agent.currentThinkId;
-  const item = agent.timeline.find((it) => it.id === thinkId);
-  if (!item || item.kind !== 'think') return doc;
-
-  const combined = item.body + text;
-  const markerIdx = combined.indexOf(THINK_CLOSE);
-  if (markerIdx === -1) {
-    return replaceAgent(doc, agentId, (a) =>
-      updateTimeline({ ...a, tokenCount }, thinkId, (it) =>
-        it.kind === 'think' ? { ...it, body: combined } : it,
-      ),
-    );
-  }
-  const finalBody = combined.slice(0, markerIdx);
-  const tail = combined.slice(markerIdx + THINK_CLOSE.length);
-  const closed = closeThink(doc, agentId, finalBody);
-  return replaceAgent(closed, agentId, (a) => ({
-    ...a,
-    tokenCount,
-    contentBuffer: tail,
-  }));
 }
 
 // ── the fold ─────────────────────────────────────────────────────
@@ -881,31 +563,18 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       return { ...doc, closing: true, closedEarly: true };
 
     case 'agent:spawn': {
-      // Pre-flight recon agent: stream it through the same timeline machinery
-      // as research (taskIndex 0 so the produce/tool handlers engage), but
-      // track it in reconAgentIds so the research column never picks it up.
+      // Pre-flight recon agent: streamed through the same timeline machinery as research (task 0), tracked
+      // in reconAgentIds so the research column never picks it up.
       if (doc.phase === 'discovering') {
-        const next = createAgent(doc, ev.agentId, {
-          phase: 'thinking',
-          taskIndex: 0,
-          taskDescription: 'Probing sources',
-        });
-        return openThink(
-          { ...next, reconAgentIds: [...next.reconAgentIds, ev.agentId] },
-          ev.agentId,
-        );
+        const r = foldAgents(rosterOf(doc), ev, { spawn: () => ({ taskIndex: 0, taskDescription: 'Probing sources' }), terminal: TERMINAL });
+        return withRoster({ ...doc, reconAgentIds: [...doc.reconAgentIds, ev.agentId] }, r);
       }
-
-      // Non-research phase: track the agent but don't open a timeline. An
-      // in-flight ask researches while the doc stays 'done'.
+      // Outside research, an agent is tracked without a timeline. An in-flight ask researches while the doc stays 'done'.
       if (doc.phase !== 'research' && !asking) {
-        return createAgent(doc, ev.agentId, { phase: 'idle', taskIndex: null });
+        return withRoster(doc, foldAgents(rosterOf(doc), ev, { spawn: () => ({ taskIndex: null }), terminal: TERMINAL }));
       }
-
-      // Research phase: bind taskIndex + description, open the first think block.
-      // The spawn names its task (`key: task:<i>`, carried on the event by the
-      // pool); a spawn without one — nothing this harness makes — falls back
-      // to spawn order, as before the key existed.
+      // Research: the spawn names its task (`key: task:<i>`, carried by the pool); a spawn without one falls back to
+      // spawn order, as before the key existed. Deep mode's task description arrives on `spine:task` just before.
       const keyed = /^task:(\d+)$/.exec(ev.key ?? '');
       let taskIndex: number;
       let description: string | null;
@@ -913,42 +582,27 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       let nextPendingDesc: string | null = doc.pendingTaskDescription;
       if (keyed) {
         taskIndex = Number(keyed[1]);
-        description = (doc.mode === 'deep' ? nextPendingDesc : null)
-          ?? doc.plan?.tasks[taskIndex]?.description
-          ?? null;
+        description = (doc.mode === 'deep' ? nextPendingDesc : null) ?? doc.plan?.tasks[taskIndex]?.description ?? null;
         nextPendingIdx = null;
         nextPendingDesc = null;
       } else if (doc.mode === 'deep') {
         taskIndex = nextPendingIdx ?? doc.researchSpawnCount;
-        description = nextPendingDesc
-          ?? doc.plan?.tasks[taskIndex]?.description
-          ?? null;
+        description = nextPendingDesc ?? doc.plan?.tasks[taskIndex]?.description ?? null;
         nextPendingIdx = null;
         nextPendingDesc = null;
       } else {
         taskIndex = doc.researchSpawnCount;
         description = doc.plan?.tasks[taskIndex]?.description ?? null;
       }
-
-      const dependencyHint =
-        doc.mode === 'deep' && taskIndex > 0
-          ? `builds on Task ${taskIndex}`
-          : null;
-
-      let next = createAgent(doc, ev.agentId, {
-        phase: 'thinking',
-        taskIndex,
-        taskDescription: description,
-        dependencyHint,
-      });
-      next = {
-        ...next,
-        researchAgentIds: [...next.researchAgentIds, ev.agentId],
+      const dependencyHint = doc.mode === 'deep' && taskIndex > 0 ? `builds on Task ${taskIndex}` : null;
+      const r = foldAgents(rosterOf(doc), ev, { spawn: () => ({ taskIndex, taskDescription: description, dependencyHint }), terminal: TERMINAL });
+      return withRoster({
+        ...doc,
+        researchAgentIds: [...doc.researchAgentIds, ev.agentId],
         researchSpawnCount: doc.researchSpawnCount + 1,
         pendingTaskIndex: nextPendingIdx,
         pendingTaskDescription: nextPendingDesc,
-      };
-      return openThink(next, ev.agentId);
+      }, r);
     }
 
     case 'agent:produce': {
@@ -956,179 +610,33 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       if (doc.synth.open) {
         return { ...doc, synth: { ...doc.synth, buffer: doc.synth.buffer + ev.text } };
       }
-      // Planner stream: the outline drafts itself in the view — accumulate
-      // the planner's grammar JSON so a renderer can lift task descriptions
-      // as they complete (the plan grammar opens no think block).
+      // Planner stream: the outline drafts itself in the view — the planner's grammar JSON accumulates so a
+      // renderer can lift task descriptions as they complete (the plan grammar opens no think block).
       if (doc.phase === 'planning') {
         const planner = doc.agents.get(ev.agentId);
         if (!planner) return doc;
-        return replaceAgent(doc, planner.id, (a) => ({
-          ...a,
-          tokenCount: ev.tokenCount,
-          contentBuffer: a.contentBuffer + ev.text,
-        }));
+        return replaceAgent(doc, planner.id, (a) => ({ ...a, tokenCount: ev.tokenCount, contentBuffer: a.contentBuffer + ev.text }));
       }
-      // Muted phases. 'discovering' streams through the same path as
-      // 'research' (its agent has taskIndex 0); an in-flight ask researches
-      // under a 'done' doc.
+      // Muted phases. 'discovering' streams like 'research'; an in-flight ask researches under a 'done' doc.
       if (doc.phase !== 'research' && doc.phase !== 'discovering' && !asking) return doc;
-
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent || agent.taskIndex === null) return doc;
-
-      let working = doc;
-      let acting = agent;
-
-      // Content-phase tokens (post-</think>, pre-tool_call) — the model is
-      // writing tool-call JSON. For the terminal `report` tool, the report
-      // body lives inside that JSON. Stream into contentBuffer so it's
-      // visible; cleared on tool_call / report when the structured event
-      // lands.
-      if (acting.phase === 'content') {
-        return replaceAgent(working, acting.id, (a) => ({
-          ...a,
-          tokenCount: ev.tokenCount,
-          contentBuffer: a.contentBuffer + ev.text,
-        }));
-      }
-
-      // Recovery stream (post agent:done): `recoverInline` force-extracts the
-      // report under an EAGER report grammar with no `<think>`/`</think>`.
-      // Route it into contentBuffer (→ "Writing report") instead of opening a
-      // think block, so a forced report isn't mislabeled as the agent
-      // "Thinking". Cleared on agent:return/recovered.
-      if (acting.recovering) {
-        return replaceAgent(working, acting.id, (a) => ({
-          ...a,
-          tokenCount: ev.tokenCount,
-          contentBuffer: a.contentBuffer + ev.text,
-        }));
-      }
-
-      // Re-enter thinking after tool_result / recovery / initial idle.
-      if (acting.phase !== 'thinking' || acting.currentThinkId === null) {
-        if (acting.phase === 'tool' || acting.phase === 'idle') {
-          working = openThink(working, acting.id);
-        } else {
-          // done — drop.
-          return replaceAgent(working, acting.id, (a) => ({ ...a, tokenCount: ev.tokenCount }));
-        }
-      }
-      return advanceThink(working, acting.id, ev.text, ev.tokenCount);
+      return withRoster(doc, foldAgents(rosterOf(doc), ev, { terminal: TERMINAL }));
     }
 
-    case 'agent:tool_call': {
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent) return doc;
-
-      // Force-close any live think block first.
-      let working = closeLiveThink(doc, ev.agentId);
-
-      // Skip timeline entry for non-research agents (synth may also emit tool_calls).
-      if (working.agents.get(ev.agentId)?.taskIndex == null) {
-        return replaceAgent(working, ev.agentId, (a) => ({
-          ...a,
-          phase: 'tool',
-          toolCallCount: a.toolCallCount + 1,
-        }));
-      }
-
-      // Terminal `report` tool: this fires at the stop token, but the report
-      // already streamed live as a "Writing report" row (the model's report
-      // body flowed into `contentBuffer` during the content phase — see
-      // `extractStreamingReport` in state-core.ts). Pushing a generic
-      // tool_call row here would render a misleading "Reading" timeline
-      // entry; instead just advance phase/counts and clear the streamed
-      // buffer. `agent:return` finalizes the report into a structured
-      // `report` item next. Detection: the agent was mid-report stream iff
-      // its `contentBuffer` (raw post-</think> tokens, not yet cleared)
-      // already holds the report open marker. Belt-and-suspenders on the
-      // terminal tool name — this harness's terminal tool is always
-      // `report`.
-      const acting = working.agents.get(ev.agentId);
-      const wasReporting =
-        ev.tool === 'report' ||
-        (acting?.contentBuffer.includes('<parameter=result>') ?? false);
-      if (wasReporting) {
-        return replaceAgent(working, ev.agentId, (a) => ({
-          ...a,
-          phase: 'tool',
-          toolCallCount: a.toolCallCount + 1,
-          contentBuffer: '',
-        }));
-      }
-
-      const id = working.nextTimelineId;
-      const next = replaceAgent(working, ev.agentId, (a) =>
-        pushTimeline(
-          {
-            ...a,
-            phase: 'tool',
-            toolCallCount: a.toolCallCount + 1,
-            pendingToolCallId: id,
-            contentBuffer: '',
-          },
-          {
-            kind: 'tool_call',
-            id,
-            tool: ev.tool,
-            argsSummary: formatArgSummary(ev.tool, ev.args),
-          },
-        ),
-      );
-      return { ...next, nextTimelineId: working.nextTimelineId + 1 };
-    }
-
-    case 'agent:tool_retry': {
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent) return doc;
-      return replaceAgent(doc, ev.agentId, (a) => ({
-        ...a,
-        retry: { tool: ev.tool, retryAt: Date.now() + ev.retryAfterMs, attempt: ev.attempt },
-      }));
-    }
-
-    case 'agent:tool_result': {
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent) return doc;
-
-      if (agent.taskIndex == null) {
-        return replaceAgent(doc, ev.agentId, (a) => ({ ...a, phase: 'idle', retry: null }));
-      }
-
-      const summary = summarizeResult(ev.tool, ev.result);
-      const id = doc.nextTimelineId;
-      const hostsUnique = Array.from(new Set(summary.hosts));
-      const next = replaceAgent(doc, ev.agentId, (a) =>
-        pushTimeline(
-          { ...a, phase: 'idle', pendingToolCallId: null, retry: null },
-          {
-            kind: 'tool_result',
-            id,
-            tool: ev.tool,
-            callId: agent.pendingToolCallId,
-            byteLength: ev.result.length,
-            preview: summary.preview,
-            hosts: hostsUnique,
-            resultCount: summary.resultCount,
-            sources: summary.sources,
-          },
-        ),
-      );
-      return {
-        ...next,
-        nextTimelineId: doc.nextTimelineId + 1,
-      };
-    }
+    case 'agent:tool_call':
+    case 'agent:tool_retry':
+    case 'agent:tool_result':
+    case 'agent:return':
+    case 'agent:recovered':
+    case 'agent:failed':
+    case 'agent:done':
+      return withRoster(doc, foldAgents(rosterOf(doc), ev as FoldableAgentEvent, { terminal: TERMINAL }));
 
     case 'agent:tool_progress':
       return doc;
 
     case 'agent:prefilled': {
-      // A tool result that carried roots admitted them onto the run: they join
-      // the live ask (or the cold brief) as they land, once each, so the strip
-      // shows what the model saw while it works — the same roots the meta line
-      // books and a reopen restores.
+      // A tool result that carried roots admitted them onto the run: they join the live ask (or the cold brief)
+      // as they land, once each — the same roots the meta line books and a reopen restores.
       const roots = ev.attachments ?? [];
       if (roots.length === 0) return doc;
       if (doc.ask !== null) {
@@ -1140,86 +648,6 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       const fresh = roots.filter((a) => !have.has(a.digest));
       return fresh.length > 0 ? { ...doc, attachments: [...doc.attachments, ...fresh] } : doc;
     }
-
-    case 'agent:return':
-    case 'agent:recovered': {
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent) return doc;
-
-      const working = closeLiveThink(doc, ev.agentId);
-
-      if (working.agents.get(ev.agentId)?.taskIndex == null) {
-        return replaceAgent(working, ev.agentId, (a) => ({
-          ...a,
-          phase: 'done',
-          endedAt: Date.now(),
-          contentBuffer: '',
-          recovering: false,
-        }));
-      }
-
-      const id = working.nextTimelineId;
-      const next = replaceAgent(working, ev.agentId, (a) =>
-        pushTimeline(
-          { ...a, phase: 'done', endedAt: Date.now(), contentBuffer: '', recovering: false },
-          {
-            kind: 'report',
-            id,
-            body: ev.result,
-            tokenCount: a.tokenCount,
-          },
-        ),
-      );
-
-      return { ...next, nextTimelineId: working.nextTimelineId + 1 };
-    }
-
-    case 'agent:failed': {
-      // Forced recovery FAILED (no result — e.g. KV exhausted mid-report decode →
-      // `llama_decode failed`). The agent already showed "Writing report"
-      // (agent:done set `recovering`); without this it spins forever. Mark it
-      // terminally `failed` → cross glyph + frozen timer. There is no report.
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent || agent.phase === 'done' || agent.phase === 'failed') return doc;
-      const working = closeLiveThink(doc, ev.agentId);
-      // Frozen with no `report` item — the cross glyph + failReason tell why.
-      const next = replaceAgent(working, ev.agentId, (a) => ({
-        ...a,
-        phase: 'failed',
-        endedAt: Date.now(),
-        contentBuffer: '',
-        recovering: false,
-        failReason: ev.reason,
-      }));
-      return next;
-    }
-
-    case 'agent:done': {
-      // Do NOT mark the agent `done` here. In the stall-break path,
-      // agent:done fires BEFORE recoverInline streams recovery tokens via
-      // agent:produce → agent:recovered. Freezing to `done` would drop those
-      // tokens. Force-close any live think and step back to `idle`, marking
-      // the agent `recovering` so the produce handler routes the forced
-      // report into contentBuffer (→ "Writing report") rather than a think
-      // block. Only agent:return / agent:recovered mark `done`.
-      //
-      // Clear the stale contentBuffer too: if the agent was in `content` phase
-      // when killed (mid tool-call JSON), the partial buffer never resolves to
-      // a tool_call; recovery refills it with the actual forced report.
-      const agent = doc.agents.get(ev.agentId);
-      if (!agent || agent.phase === 'done') return doc;
-      const working = closeLiveThink(doc, ev.agentId);
-      return replaceAgent(working, ev.agentId, (a) => ({
-        ...a,
-        phase: 'idle',
-        // Drop any partial content buffer: if the agent is being force-recovered
-        // it never closed the terminal call, so recovery prose (refilled into
-        // contentBuffer while `recovering`) drives the "Writing report" row now.
-        contentBuffer: '',
-        recovering: true,
-      }));
-    }
-
 
     default:
       return doc;

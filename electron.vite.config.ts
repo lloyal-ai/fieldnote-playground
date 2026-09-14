@@ -13,12 +13,19 @@ import { resolve } from "node:path";
 export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
+    resolve: { preserveSymlinks: true }, // LOCAL-LINK ONLY — see the renderer's note.
     build: {
       lib: { entry: resolve(__dirname, "targets/desktop/main.ts") },
     },
   },
   preload: {
-    plugins: [externalizeDepsPlugin()],
+    // The preload runs before the renderer, in a context with constrained
+    // module resolution — a bare specifier left for runtime is the one import
+    // that can fail with no console to report it, leaving `window.harness`
+    // undefined and a blank window. So the bridge is BUNDLED in; `electron`
+    // itself stays external, as it must.
+    plugins: [externalizeDepsPlugin({ exclude: ["@lloyal-labs/desktop"] })],
+    resolve: { preserveSymlinks: true }, // LOCAL-LINK ONLY — see the renderer's note.
     build: {
       lib: { entry: resolve(__dirname, "targets/desktop/preload.ts") },
     },
@@ -26,13 +33,16 @@ export default defineConfig({
   renderer: {
     root: resolve(__dirname, "targets/desktop"),
     plugins: [react()],
-    // `@lloyal-labs/media` is CommonJS, and the workspace link means Vite
-    // serves it straight from `/@fs/` rather than pre-bundling it — so a
-    // NAMED value import off it (`Figures.tsx` reads DOCUMENT_CONFIG_TYPE)
-    // fails at module eval with "does not provide an export named …", and a
-    // renderer that throws there paints nothing at all. `vite.web.config.ts`
-    // has carried this same line all along; the desktop renderer never did,
-    // which is why only this target went blank.
+    // LOCAL-LINK ONLY — not part of the template. Our `@lloyal-labs/*` packages
+    // ship CommonJS, and a symlinked one resolves to its real path outside this
+    // project, where neither the dev pre-bundler nor the build's commonjs
+    // plugin looks — so a NAMED value import off it fails at module eval with
+    // "does not provide an export named …", and a renderer that throws there
+    // paints nothing at all. Keeping the symlinked path puts them back under
+    // `node_modules/`, and makes `@lloyal-labs/ui` share this project's React.
+    resolve: { preserveSymlinks: true },
+    // Dev-server pre-bundling for the same packages; the line above is what
+    // makes `build:desktop` work too.
     optimizeDeps: { include: ["@lloyal-labs/media"] },
     build: {
       rollupOptions: { input: resolve(__dirname, "targets/desktop/index.html") },
