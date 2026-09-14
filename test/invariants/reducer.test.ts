@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import { reduce, initialState, DOC_PHASES, type AppState } from '../../src/ui/state.js';
 import type { WorkflowEvent } from '../../src/brief/protocol.js';
 import {
-  selectAnswer, selectControls, selectEtaTasks, selectLive, selectMoment, selectReviewing,
-  selectRunDepth, selectRunTitle, selectStatus, selectTitle,
+  selectAnswer, selectControls, selectEtaTasks, selectLive, selectMarks, selectMoment, selectReviewing,
+  selectRunDepth, selectRunTitle, selectSections, selectStatus, selectTitle,
 } from '../../src/ui/select.js';
 
 const fold = (events: WorkflowEvent[], from: AppState = initialState): AppState =>
@@ -280,6 +280,38 @@ test("a cold brief grows its own media as a tool admits roots; a prefill without
   assert.deepEqual(s.documents.get(A)!.askAttachments, []);
 });
 
+
+// ── A task is logical; an agent is one attempt at it ───────────
+// The pool names each spawn with its task's key and may seat them in any
+// order; a heal is a NEW agent under the SAME key. What the reader sees is
+// the task — worked by whichever attempt is the current one.
+
+test('a healed inquiry is the section the reader reads, and the brief is not marked unsettled', () => {
+  const s = fold([
+    { type: 'query', docId: A, query: 'Q1', warm: false } as WorkflowEvent,
+    { type: 'plan:start', query: 'Q1', mode: 'flat' } as WorkflowEvent,
+    { type: 'plan', intent: 'research', tasks: [{ description: 'the near half' }, { description: 'the far half' }], clarifyQuestions: [], tokenCount: 1, timeMs: 1 } as WorkflowEvent,
+    { type: 'research:start', agentCount: 2, mode: 'flat' } as WorkflowEvent,
+    // Admission reorders: the far task seats first.
+    { type: 'agent:spawn', agentId: 21, key: 'task:1' } as WorkflowEvent,
+    { type: 'agent:spawn', agentId: 20, key: 'task:0' } as WorkflowEvent,
+    // The near task's first attempt dies; the pool spawns its replacement under the same key.
+    { type: 'agent:failed', agentId: 20, reason: 'decode_error' } as WorkflowEvent,
+    { type: 'agent:spawn', agentId: 22, key: 'task:0' } as WorkflowEvent,
+    { type: 'agent:return', agentId: 22, result: 'near findings, second attempt' } as WorkflowEvent,
+    { type: 'agent:return', agentId: 21, result: 'far findings' } as WorkflowEvent,
+    { type: 'answer', text: 'the settled answer' } as WorkflowEvent,
+    COMPLETE,
+  ]);
+  const sections = selectSections(s);
+  assert.deepEqual(sections.map((x) => x.title), ['the near half', 'the far half']);
+  assert.equal(sections[0].prose, 'near findings, second attempt', "the healed attempt's findings are the section");
+  assert.equal(sections[0].inquiry?.verb.kind, 'settled');
+  assert.equal(sections[1].prose, 'far findings', 'the key names the task, not the order it was admitted in');
+  assert.deepEqual(selectMarks(s), [], 'nothing closed unsettled: every task has a settled attempt');
+  // The attempt that died is still there for the dev pane — only the section stopped reading it.
+  assert.equal(s.documents.get(A)!.roster.agents.get(20)!.failReason, 'decode_error');
+});
 
 test("the run bar commands the RUNNING document while the canvas shows another", () => {
   // Run A pauses; the user opens settled B from the library. `live` reads the

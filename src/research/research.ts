@@ -80,7 +80,8 @@ function plannerContext(sources: readonly Ability[], attachments: readonly Attac
   return lines.join("\n");
 }
 
-/** What each source covers for this ask (remembered in `coverage`), then the planner. Sends preflight:*, plan:start, plan. */
+/** What each source covers for this ask (remembered in `coverage`), then the planner. The plan is RETURNED — the
+ *  brief publishes it; what goes on the wire here is progress nobody's state depends on. Sends preflight:*, plan:start. */
 export function* plan(trunk: Branch | null, ask: Inputs, coverage: Map<string, Coverage>): Operation<PlanResult> {
   const wire = yield* useWire<WorkflowEvent>();
   const sources = yield* participating(ask.excluded, ask.sources);
@@ -116,9 +117,7 @@ export function* plan(trunk: Branch | null, ask: Inputs, coverage: Map<string, C
     maxTasks: BUDGETS.effort[ask.effort].maxTasks,
     availableAbilities: sources.length >= 2 ? sources : undefined,
   });
-  const result = (yield* planner.execute({ query: ask.text, context })) as PlanResult;
-  yield* wire.send({ type: "plan", intent: result.intent, tasks: result.tasks, clarifyQuestions: result.clarifyQuestions, tokenCount: result.tokenCount, timeMs: result.timeMs });
-  return result;
+  return (yield* planner.execute({ query: ask.text, context })) as PlanResult;
 }
 
 /** From the trunk alone: a fork of it answers the question directly. The trunk is not written; the brief commits the pair. */

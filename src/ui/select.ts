@@ -479,9 +479,13 @@ const reportBody = (body: string): string => {
   return body;
 };
 
-const agentForTask = (app: AppState, index: number): AgentRuntime | null => {
-  for (const a of activeDoc(app).roster.agents.values()) if (a.taskIndex === index) return a;
-  return null;
+/** The attempt at each task that counts — the CURRENT one. A task may be attempted more than once (a heal
+ *  re-spawns it under the same task), and the roster keeps every attempt for the dev pane's lanes; the reader
+ *  is shown the latest, which is the last one the roster took in. */
+const currentAttempts = (doc: DocState): Map<number, AgentRuntime> => {
+  const byTask = new Map<number, AgentRuntime>();
+  for (const a of doc.roster.agents.values()) if (a.taskIndex !== null) byTask.set(a.taskIndex, a);
+  return byTask;
 };
 
 /** Failure, in the librarian's voice. Unlisted reasons are mechanical
@@ -530,17 +534,19 @@ const proseOf = (a: AgentRuntime): { prose: string | null; streaming: boolean } 
   return live ? { prose: live, streaming: true } : { prose: null, streaming: false };
 };
 
-export const selectSections = (app: AppState): Section[] =>
-  (activeDoc(app).plan?.tasks ?? []).map((task, index) => {
-    const a = agentForTask(app, index);
+export const selectSections = (app: AppState): Section[] => {
+  const doc = activeDoc(app);
+  const attempts = currentAttempts(doc);
+  return (doc.plan?.tasks ?? []).map((task, index) => {
+    const a = attempts.get(index) ?? null;
     const { prose, streaming } = a ? proseOf(a) : { prose: null, streaming: false };
     return {
       index,
       title: sectionTitle(task.description),
       task: task.description,
-      inherits: activeDoc(app).mode === "deep" && index > 0,
+      inherits: doc.mode === "deep" && index > 0,
       // Derived: a flat-mode task the plan named with no agent yet, while the pool is still seating.
-      waiting: !a && activeDoc(app).mode === "flat" && activeDoc(app).phase === "research",
+      waiting: !a && doc.mode === "flat" && doc.phase === "research",
       inquiry: a && {
         id: a.id,
         index,
@@ -552,6 +558,7 @@ export const selectSections = (app: AppState): Section[] =>
       streaming,
     };
   });
+};
 
 // ── the library ──────────────────────────────────────────────────
 
@@ -652,8 +659,10 @@ export const selectMarks = (app: AppState): string[] => {
   const cited = selectCitations(app).length;
   if (cited === 1) marks.push("Rests on one source — read it before you lean on it.");
   else if (cited === 2) marks.push("Rests on two sources.");
+  // A line of inquiry, not an attempt at one: a task whose latest attempt failed closed unsettled, and a task
+  // that failed once and was healed did not.
   let unsettled = 0;
-  for (const a of activeDoc(app).roster.agents.values()) if (a.failReason !== null && a.taskIndex !== null) unsettled += 1;
+  for (const a of currentAttempts(activeDoc(app)).values()) if (a.failReason !== null) unsettled += 1;
   if (unsettled === 1) marks.push("One line of inquiry closed without settling.");
   else if (unsettled > 1) marks.push(`${unsettled} lines of inquiry closed without settling.`);
   return marks;

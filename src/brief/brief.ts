@@ -91,16 +91,23 @@ export function briefs(deps: {
       // The question is the plan: said on the wire so the canvas frames the ask the way it frames a planned one.
       const plan = singleTaskPlan(text);
       yield* wire.send({ type: "plan:start", query: text, mode });
-      yield* wire.send({ type: "plan", intent: plan.intent, tasks: plan.tasks, clarifyQuestions: plan.clarifyQuestions, tokenCount: plan.tokenCount, timeMs: plan.timeMs });
+      yield* publish(plan);
       yield* write(ask, plan, warm);
     });
   }
 
   // ── Frame ──────────────────────────────────────────────────────────────────
 
+  /** The plan the canvas frames — said EXACTLY once, here, from what the algorithm returned. A planner's own
+   *  progress may say anything on the wire; the brief's state is decided by the value it hands back. */
+  function* publish(plan: PlanResult): Operation<void> {
+    yield* wire.send({ type: "plan", intent: plan.intent, tasks: plan.tasks, clarifyQuestions: plan.clarifyQuestions, tokenCount: plan.tokenCount, timeMs: plan.timeMs });
+  }
+
   /** Plan the brief. The plan waits for the reader's yes — unless the model must ask first, or can answer at once. */
   function* frame(ask: Inputs, review: boolean): Operation<void> {
     const plan = yield* research.plan(session.trunk, ask, coverage);
+    yield* publish(plan);
     if (plan.intent === "clarify") {
       if (!review) throw new HarnessExit("Planner asked clarifying questions; non-TTY mode can't answer. Aborting.", 2);
       pendingPlan = { plan, inputs: ask, revision: ++revision };

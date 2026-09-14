@@ -42,7 +42,10 @@ interface RunRecord {
   /** Annexure numbers the folder already held when this run began — the first name each of this run's tries. */
   ordinalBase: number;
   inResearch: boolean;
-  spawnOrdinal: number;
+  /** The highest task ordinal this run has named — what a spawn that names no task takes next. */
+  lastOrdinal: number;
+  /** Each attempt's task, by the ordinal its spawn key named: a heal maps to the SAME task as the attempt it
+   *  replaces, so its findings land in that task's annexure. Keys are this run's; the record dies with it. */
   agentToOrdinal: Map<number, number>;
   taskByOrdinal: Map<number, string>;
   fileOf: Map<number, number>;
@@ -205,6 +208,8 @@ export function* openLibrary(
     else fs.writeFileSync(path.join(r.dir, "report.md"), doc, "utf8");
   }
 
+  /** A task's evidence, under a name reserved once for that task: a later attempt at it (a heal) writes over
+   *  the earlier one's findings rather than opening a file of its own. */
   function writeAnnexure(r: RunRecord, ord: number, body: string): void {
     let n = r.fileOf.get(ord);
     if (n === undefined) { n = reserveName(r.dir, "annexure", r.ordinalBase + ord); r.fileOf.set(ord, n); }
@@ -221,9 +226,17 @@ export function* openLibrary(
       case "research:done": r.inResearch = false; break;
       case "fanout:tasks": ev.tasks.forEach((t, i) => r.taskByOrdinal.set(i + 1, t.description)); break;
       case "spine:task": r.taskByOrdinal.set(ev.taskIndex + 1, ev.description); break;
-      case "agent:spawn":
-        if (r.inResearch && !r.agentToOrdinal.has(ev.agentId)) { r.spawnOrdinal += 1; r.agentToOrdinal.set(ev.agentId, r.spawnOrdinal); }
+      case "agent:spawn": {
+        // The spawn's key (`task:<i>`) is the task it works — the one thing arrival order is not, since the
+        // pool seats what the context can hold and a heal re-spawns a task under the same key. A spawn that
+        // names no task takes the next free ordinal.
+        if (!r.inResearch || r.agentToOrdinal.has(ev.agentId)) break;
+        const named = /^task:(\d+)$/.exec(ev.key ?? "");
+        const ord = named ? Number(named[1]) + 1 : r.lastOrdinal + 1;
+        r.lastOrdinal = Math.max(r.lastOrdinal, ord);
+        r.agentToOrdinal.set(ev.agentId, ord);
         break;
+      }
       case "agent:return":
       case "agent:recovered": {
         const ord = r.agentToOrdinal.get(ev.agentId);
@@ -297,7 +310,7 @@ export function* openLibrary(
       if (settledAlready) for (const name of fs.readdirSync(folder)) { const m = /^annexure-(\d+)\.md$/.exec(name); if (m) taken = Math.max(taken, Number(m[1])); }
       record = {
         docId: id, dir: folder, query: ask.text, mode: ask.mode, attachments: ask.attachments.map((a) => a.digest),
-        appending: settledAlready, ordinalBase: taken, inResearch: false, spawnOrdinal: 0,
+        appending: settledAlready, ordinalBase: taken, inResearch: false, lastOrdinal: 0,
         agentToOrdinal: new Map(), taskByOrdinal: new Map(), fileOf: new Map(), startedAt: Date.now(), synthStats: null, lastAnswer: null,
       };
     },
