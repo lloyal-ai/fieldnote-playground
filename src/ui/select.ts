@@ -9,9 +9,9 @@ import {
   type DocPhase,
   type AgentRuntime,
   type TimelineItem,
-} from "../../src/ui/state.js";
+} from "./state.js";
 import { emptyRoster } from "@lloyal-labs/ui/fold";
-import { BUDGETS } from "../../src/research/budgets.js";
+import { BUDGETS } from "../research/budgets.js";
 import type { Pace } from "./pace.js";
 
 // ── moments ──────────────────────────────────────────────────────
@@ -889,7 +889,7 @@ const stepOf = (t: TimelineItem): WorkStep | null =>
  *  omitted: it is already streaming in place as the section's prose.
  *
  *  Pure factory: hold the result with `useMemo(() => selectWorkFor(id), [id])`
- *  — `useBrief` memoizes by selector identity, so the caller owns the
+ *  — `useProjection` memoizes by selector identity, so the caller owns the
  *  identity for exactly as long as the inquiry renders. */
 export const selectWorkFor = (id: number): ((app: AppState) => WorkStep[]) => {
   return (app: AppState): WorkStep[] => {

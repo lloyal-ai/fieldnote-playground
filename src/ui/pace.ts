@@ -5,7 +5,7 @@
  *  pass) and are replaced by what THIS machine actually does: each settled
  *  brief records its wall time, keyed by depth and shape, halved toward
  *  the newest run. */
-import { BUDGETS } from "../../src/research/budgets.js";
+import { BUDGETS } from "../research/budgets.js";
 import type { Depth, Shape } from "./select.js";
 
 export interface Pace {

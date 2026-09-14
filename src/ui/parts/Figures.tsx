@@ -16,7 +16,7 @@ import { useState, type CSSProperties, type ReactElement } from "react";
 import { Lightbox as UiLightbox, pageFacts, resolveAsset, useAssets } from "@lloyal-labs/ui";
 import type { Asset, LightboxProps } from "@lloyal-labs/ui";
 import { color, font, radius, shadow } from "../theme.js";
-import { useBrief } from "../store.js";
+import { useProjection } from "@lloyal-labs/ui";
 import { selectSeen } from "../select.js";
 import { selectThreadDigests } from "../select.js";
 import { contentOrigin, representationUrl, sourceUrl } from "../content-urls.js";
@@ -29,7 +29,7 @@ export type { Asset };
 export const Lightbox = (props: Omit<LightboxProps, "styles">): ReactElement | null => <UiLightbox {...props} styles={LIGHTBOX} />;
 
 export function Figures(): ReactElement | null {
-  const seen = useBrief(selectSeen);
+  const seen = useProjection(selectSeen);
   return <FigureStrip digests={seen} />;
 }
 
@@ -41,7 +41,7 @@ export function FigureStrip({ digests }: { digests: string[] }): ReactElement | 
   const assets = useAssets(digests);
   // Page renders the thread holds — admitted by a tool, persisted with the run —
   // say which pages the model looked at.
-  const threadDigests = useBrief(selectThreadDigests);
+  const threadDigests = useProjection(selectThreadDigests);
   const [open, setOpen] = useState<{ digest: string; label?: string } | { pdf: string; label: string } | null>(null);
   // Read off the loaded element rather than the wire: the descriptor carries a
   // byte length, never pixels, and this is the representation's true size.

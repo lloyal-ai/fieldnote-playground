@@ -12,7 +12,7 @@ import { memo, useState, type CSSProperties, type ReactElement, type ReactNode }
 import { Lightbox, Markdown, useAssets } from "@lloyal-labs/ui";
 import { color, font, radius } from "../theme.js";
 import { anchorsOf, selectThreadDigests } from "../select.js";
-import { useBrief } from "../store.js";
+import { useProjection } from "@lloyal-labs/ui";
 import { parseAttachmentHref, resolvePrefix } from "../content-urls.js";
 
 const textOf = (node: ReactNode): string =>
@@ -38,7 +38,7 @@ export const Prose = memo(function Prose({ markdown: raw, anchorPrefix, citation
   // A cited page opens where it is cited. The thread's roots are what an
   // `attachment://` prefix may resolve to; the sidecar says which page root
   // stands for the page.
-  const digests = useBrief(selectThreadDigests);
+  const digests = useProjection(selectThreadDigests);
   const assets = useAssets(digests);
   const [openPage, setOpenPage] = useState<{ digest: string; label: string } | null>(null);
   // Models sometimes wrap a woven link in literal brackets — shed them.

@@ -4,7 +4,8 @@
  *  hardware still shows its work. Settled rows fade; nothing floats. */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { color, font, inquiryColor, radius, shadow } from "../theme.js";
-import { send, useBrief } from "../store.js";
+import { useProjection, useSend } from "@lloyal-labs/ui";
+import type { Command } from "../../brief/protocol.js";
 import { selectDev, selectWorkFor, type Inquiry, type WorkStep } from "../select.js";
 
 export function InquiryRow({ inquiry, closing, label }: {
@@ -13,8 +14,9 @@ export function InquiryRow({ inquiry, closing, label }: {
   /** Overrides the "Inquiry N" identity — the probes name their source. */
   label?: string;
 }): ReactElement {
+  const send = useSend<Command>();
   const [open, setOpen] = useState(false);
-  const dev = useBrief(selectDev);
+  const dev = useProjection(selectDev);
   const { verb } = inquiry;
   const live = inquiry.endedAt === null && verb.kind !== "failed";
   const identity = inquiryColor(inquiry.index);
@@ -66,7 +68,7 @@ export function InquiryRow({ inquiry, closing, label }: {
  *  Follows the tail. */
 export function Work({ id }: { id: number }): ReactElement {
   const selectWork = useMemo(() => selectWorkFor(id), [id]);
-  const steps = useBrief(selectWork);
+  const steps = useProjection(selectWork);
   const pane = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const el = pane.current;

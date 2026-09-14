@@ -7,7 +7,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { shedTrailingSources } from "../../targets/_shared/select.js";
+import { shedTrailingSources } from "../../src/ui/select.js";
 
 const PROSE = "# Findings\n\nContinuous batching admits requests per iteration [1](https://a.io/1).\n";
 

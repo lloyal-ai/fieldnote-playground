@@ -8,7 +8,8 @@
  *  beat) deletes. */
 import { useEffect, useState, type CSSProperties, type ReactElement } from "react";
 import { color, font, radius } from "../theme.js";
-import { send, useBrief } from "../store.js";
+import { useProjection, useSend } from "@lloyal-labs/ui";
+import type { Command } from "../../brief/protocol.js";
 import {
   selectLibrary, selectLibrarySearch, selectLive, selectTitle, type ReportEntry,
 } from "../select.js";
@@ -31,10 +32,11 @@ const day = (iso: string): string => {
 };
 
 export function Library(): ReactElement | null {
-  const entries = useBrief(selectLibrary);
-  const title = useBrief(selectTitle);
-  const search = useBrief(selectLibrarySearch);
-  const live = useBrief(selectLive);
+  const send = useSend<Command>();
+  const entries = useProjection(selectLibrary);
+  const title = useProjection(selectTitle);
+  const search = useProjection(selectLibrarySearch);
+  const live = useProjection(selectLive);
   const [arming, setArming] = useState<string | null>(null);
   const [q, setQ] = useState("");
   /** A scoring call is in flight — set when the debounce fires, cleared when

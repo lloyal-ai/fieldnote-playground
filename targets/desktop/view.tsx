@@ -4,7 +4,7 @@
  */
 import { createRoot } from "react-dom/client";
 import { HarnessProvider } from "@lloyal-labs/ui";
-import { HarnessApp } from "../_shared/App.js";
+import { HarnessApp } from "../../src/ui/App.js";
 import { initialState, reduce } from "../../src/ui/state.js";
 
 createRoot(document.getElementById("root")!).render(

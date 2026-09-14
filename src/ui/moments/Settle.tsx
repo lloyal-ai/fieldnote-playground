@@ -7,7 +7,7 @@
  *  one-file-per-document layout on disk. */
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { color, font, radius } from "../theme.js";
-import { useBrief } from "../store.js";
+import { useProjection } from "@lloyal-labs/ui";
 import {
   DEPTHS, SHAPES, selectAnswer, selectAsk, selectCitations, selectDepth,
   selectExchanges, selectMarks, selectRail, selectRunShape, selectSettleProse,
@@ -21,17 +21,17 @@ import { Prose } from "../parts/Prose.js";
 import { Sources } from "../parts/Sources.js";
 
 export function Settle(): ReactElement {
-  const title = useBrief(selectTitle);
-  const answer = useBrief(selectAnswer);
-  const prose = useBrief(selectSettleProse);
-  const citations = useBrief(selectCitations);
-  const notes = useBrief(selectSourceNotes);
-  const marks = useBrief(selectMarks);
-  const shape = useBrief(selectRunShape);
-  const depth = useBrief(selectDepth);
-  const rail = useBrief(selectRail);
-  const exchanges = useBrief(selectExchanges);
-  const ask = useBrief(selectAsk);
+  const title = useProjection(selectTitle);
+  const answer = useProjection(selectAnswer);
+  const prose = useProjection(selectSettleProse);
+  const citations = useProjection(selectCitations);
+  const notes = useProjection(selectSourceNotes);
+  const marks = useProjection(selectMarks);
+  const shape = useProjection(selectRunShape);
+  const depth = useProjection(selectDepth);
+  const rail = useProjection(selectRail);
+  const exchanges = useProjection(selectExchanges);
+  const ask = useProjection(selectAsk);
   const [showThinking, setShowThinking] = useState(false);
   // Anchor-on-submit: when a follow-up appears (the harness echoes the query
   // the instant it accepts the submit), bring its block into view ONCE. No

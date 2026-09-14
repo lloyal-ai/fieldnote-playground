@@ -6,7 +6,8 @@
  *  run. Depth applies on selection (`set_effort` — next run). */
 import { useEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type DragEvent, type ReactElement } from "react";
 import { color, font, radius, shadow } from "../theme.js";
-import { send, useBrief } from "../store.js";
+import { useProjection, useSend } from "@lloyal-labs/ui";
+import type { Command } from "../../brief/protocol.js";
 import { contentOrigin, ingestMedia, representationUrl } from "../content-urls.js";
 import { resolveAsset } from "./Figures.js";
 import type { Descriptor } from "@lloyal-labs/media";
@@ -16,7 +17,7 @@ import {
   type Shape,
 } from "../select.js";
 import { paceFor } from "../pace.js";
-import type { AppState } from "../../../src/ui/state.js";
+import type { AppState } from "../state.js";
 
 // Stable identities — the composer re-renders per keystroke, and a fresh
 // inline closure per render would grow the fold's memo map (store contract).
@@ -82,6 +83,7 @@ export function Composer({ shape, placeholder }: {
   shape: Shape;
   placeholder: string;
 }): ReactElement {
+  const send = useSend<Command>();
   const [draft, setDraft] = useState("");
   const [images, setImages] = useState<Attached[]>([]);
   const [imageError, setImageError] = useState("");
@@ -98,21 +100,21 @@ export function Composer({ shape, placeholder }: {
   /** An ability just saved toward its first enable — its pill pulses until
    *  `abilities:state` confirms (a corpus enable INDEXES, which takes time). */
   const [enabling, setEnabling] = useState<string | null>(null);
-  const depth = useBrief(selectDepth);
-  const live = useBrief(selectLive);
-  const tasks = useBrief(selectEtaTasks);
-  const settled = useBrief(selectSettled);
-  const activeDocId = useBrief(selectActiveDocId);
-  const clarifying = useBrief(selectClarifying);
-  const revision = useBrief(selectRevision);
+  const depth = useProjection(selectDepth);
+  const live = useProjection(selectLive);
+  const tasks = useProjection(selectEtaTasks);
+  const settled = useProjection(selectSettled);
+  const activeDocId = useProjection(selectActiveDocId);
+  const clarifying = useProjection(selectClarifying);
+  const revision = useProjection(selectRevision);
   // What submit() will actually send — the render gates below share the
   // same truth instead of re-deriving it.
   const willSkipPlanner = settled ? true : shape === "ask";
-  const libraries = useBrief(selectLibraries);
+  const libraries = useProjection(selectLibraries);
   const [configFor, setConfigFor] = useState<string | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
   const configPanel = libraries.find((l) => l.name === configFor) ?? null;
-  const askNow = useBrief(selectActiveAsk);
+  const askNow = useProjection(selectActiveAsk);
 
   // Acknowledgment: a document was born or activated (the echo lands in
   // milliseconds), the warm ask echoed, or the clarify round moved on.
@@ -516,8 +518,8 @@ function Clock(): ReactElement {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
-  const banked = useBrief(selectBanked);
-  const resumedAt = useBrief(selectResumedAt);
+  const banked = useProjection(selectBanked);
+  const resumedAt = useProjection(selectResumedAt);
   const elapsed = banked + (resumedAt !== null ? Math.max(0, now - resumedAt) : 0);
   return (
     <span style={S.clock}>

@@ -6,7 +6,8 @@
  *  editor's query, in the document's voice. */
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { color, font, inquiryColor } from "../theme.js";
-import { send, useBrief } from "../store.js";
+import { useProjection, useSend } from "@lloyal-labs/ui";
+import type { Command } from "../../brief/protocol.js";
 import {
   selectClarify, selectDev, selectDiscovering, selectOutline, selectOutlineDraft,
   selectProbes, selectReviewing, selectRevision, selectTitle, type Probe,
@@ -18,12 +19,12 @@ import { Thinking, doc } from "../parts/Shell.js";
 const START_HOLD_S = 5;
 
 export function Frame(): ReactElement {
-  const title = useBrief(selectTitle);
-  const clarify = useBrief(selectClarify);
-  const discovering = useBrief(selectDiscovering);
-  const draft = useBrief(selectOutlineDraft);
-  const outline = useBrief(selectOutline);
-  const reviewing = useBrief(selectReviewing);
+  const title = useProjection(selectTitle);
+  const clarify = useProjection(selectClarify);
+  const discovering = useProjection(selectDiscovering);
+  const draft = useProjection(selectOutlineDraft);
+  const outline = useProjection(selectOutline);
+  const reviewing = useProjection(selectReviewing);
 
   return (
     <div style={doc}>
@@ -81,7 +82,8 @@ function Line({ n, text, live }: { n: number; text: string; live?: boolean }): R
  *  edit holds it. Every gesture dispatches the harness's own plan command —
  *  the view keeps no plan state of its own. */
 function Review({ outline }: { outline: string[] }): ReactElement {
-  const revision = useBrief(selectRevision);   // the round every gesture names; a stale one is refused with a toast
+  const send = useSend<Command>();
+  const revision = useProjection(selectRevision);   // the round every gesture names; a stale one is refused with a toast
   const [left, setLeft] = useState(START_HOLD_S);
   const [editing, setEditing] = useState<number | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -191,7 +193,7 @@ const lineTextBase: CSSProperties = {
  *  running tally, and the latest beat streaming through. Click (or Enter
  *  on the glyph) to disclose the probe's whole work stream in place. */
 function Probes(): ReactElement | null {
-  const probes = useBrief(selectProbes);
+  const probes = useProjection(selectProbes);
   if (probes.length === 0) return null;
   return (
     <div style={P.stack}>
@@ -204,7 +206,7 @@ function Probes(): ReactElement | null {
 
 function ProbeCard({ probe }: { probe: Probe }): ReactElement {
   const [open, setOpen] = useState(false);
-  const dev = useBrief(selectDev);
+  const dev = useProjection(selectDev);
   const { inquiry } = probe;
   const live = inquiry.endedAt === null && inquiry.verb.kind !== "failed";
   const tally =

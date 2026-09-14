@@ -2,7 +2,8 @@
  *  canvas, and the docked composer. Moments render inside the canvas. */
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { color, font, radius, thinking } from "../theme.js";
-import { send, useBrief, useConnection } from "../store.js";
+import { useConnection, useProjection, useSend } from "@lloyal-labs/ui";
+import type { Command } from "../../brief/protocol.js";
 import {
   etaOf, selectBanked, selectControls, selectEtaTasks, selectLive, selectMoment,
   selectNotice, selectResumedAt, selectReviewing, selectRunDepth, selectRunShape, selectRunTitle,
@@ -19,6 +20,7 @@ export function Wordmark({ collapsed = false, onToggle }: {
   collapsed?: boolean;
   onToggle?: () => void;
 } = {}): ReactElement {
+  const send = useSend<Command>();
   return (
     <div style={{ ...S.brand, ...(collapsed ? S.brandRail : null) }}>
       <button
@@ -94,7 +96,7 @@ export function TrustStrip({ detail }: { detail?: string }): ReactElement {
  *  but they scroll away, so this stays — and it opens the SAME enlarged view
  *  rather than a second one. */
 function Seen(): ReactElement | null {
-  const seen = useBrief(selectSeen);
+  const seen = useProjection(selectSeen);
   const origin = contentOrigin();
   const assets = useAssets(seen);
   const [open, setOpen] = useState<string | null>(null);
@@ -127,16 +129,17 @@ function Seen(): ReactElement | null {
 }
 
 function RunBar(): ReactElement {
-  const live = useBrief(selectLive);
-  const reviewing = useBrief(selectReviewing);
-  const status = useBrief(selectStatus);
-  const title = useBrief(selectRunTitle);
-  const { paused, closing } = useBrief(selectControls);
-  const depth = useBrief(selectRunDepth);
-  const shape = useBrief(selectRunShape);
-  const tasks = useBrief(selectEtaTasks);
-  const banked = useBrief(selectBanked);
-  const resumedAt = useBrief(selectResumedAt);
+  const send = useSend<Command>();
+  const live = useProjection(selectLive);
+  const reviewing = useProjection(selectReviewing);
+  const status = useProjection(selectStatus);
+  const title = useProjection(selectRunTitle);
+  const { paused, closing } = useProjection(selectControls);
+  const depth = useProjection(selectRunDepth);
+  const shape = useProjection(selectRunShape);
+  const tasks = useProjection(selectEtaTasks);
+  const banked = useProjection(selectBanked);
+  const resumedAt = useProjection(selectResumedAt);
   // The bar owns its own second hand (the Clock pattern): the fold only
   // re-renders on events, and an estimate that moves only when something
   // happens reads as frozen.
@@ -208,8 +211,8 @@ export function Shell({ children, dock, library }: {
   // canvas div persists across moment swaps — so reset to the top when the
   // canvas turns over to a fresh title.
   const canvasRef = useRef<HTMLDivElement>(null);
-  const title = useBrief(selectTitle);
-  const moment = useBrief(selectMoment);
+  const title = useProjection(selectTitle);
+  const moment = useProjection(selectMoment);
   useEffect(() => {
     if (moment === "frame" && canvasRef.current) canvasRef.current.scrollTop = 0;
   }, [title, moment]);
@@ -263,7 +266,7 @@ function ConnectionBanner(): ReactElement | null {
  *  confirmation, an error the run surfaced. Fades on its own; a new
  *  notice re-shows. Nothing in the register floats. */
 function Notice(): ReactElement | null {
-  const notice = useBrief(selectNotice);
+  const notice = useProjection(selectNotice);
   const [expired, setExpired] = useState<number | null>(null);
   useEffect(() => {
     if (!notice) return;

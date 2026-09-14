@@ -6,7 +6,7 @@
  *  brief into one voice. */
 import type { CSSProperties, ReactElement } from "react";
 import { color, font } from "../theme.js";
-import { useBrief } from "../store.js";
+import { useProjection } from "@lloyal-labs/ui";
 import {
   selectControls, selectRail, selectSections, selectSettling, selectTitle,
 } from "../select.js";
@@ -17,11 +17,11 @@ import { OutlineRail } from "../parts/OutlineRail.js";
 import { Prose } from "../parts/Prose.js";
 
 export function Write(): ReactElement {
-  const title = useBrief(selectTitle);
-  const sections = useBrief(selectSections);
-  const settling = useBrief(selectSettling);
-  const rail = useBrief(selectRail);
-  const { closing } = useBrief(selectControls);
+  const title = useProjection(selectTitle);
+  const sections = useProjection(selectSections);
+  const settling = useProjection(selectSettling);
+  const rail = useProjection(selectRail);
+  const { closing } = useProjection(selectControls);
 
   return (
     <div style={spread}>

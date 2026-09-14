@@ -10,7 +10,7 @@ import type { WorkflowEvent } from '../../src/brief/protocol.js';
 import {
   selectAnswer, selectControls, selectEtaTasks, selectLive, selectMoment, selectReviewing,
   selectRunDepth, selectRunTitle, selectStatus, selectTitle,
-} from '../../targets/_shared/select.js';
+} from '../../src/ui/select.js';
 
 const fold = (events: WorkflowEvent[], from: AppState = initialState): AppState =>
   events.reduce(reduce, from);

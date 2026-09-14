@@ -4,7 +4,7 @@
  *  spinner while weights come up. */
 import type { CSSProperties, ReactElement } from "react";
 import { color, font, radius, shadow } from "../theme.js";
-import { useBrief } from "../store.js";
+import { useProjection } from "@lloyal-labs/ui";
 import { SHAPES, selectBoot, type Shape } from "../select.js";
 import { Thinking } from "../parts/Shell.js";
 
@@ -18,7 +18,7 @@ export function Ask({ shape, onShape }: {
   shape: Shape;
   onShape: (shape: Shape) => void;
 }): ReactElement {
-  const boot = useBrief(selectBoot);
+  const boot = useProjection(selectBoot);
 
   return (
     <div style={S.center}>

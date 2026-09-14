@@ -4,7 +4,7 @@
  * view does: one harness, one fold, one brief.
  *
  * The view is a renderer of the harness's events and a dispatcher of its
- * commands — the fold lives in `store.ts`, every derivation in `select.ts`,
+ * commands — the fold lives in `state.ts`, every derivation in `select.ts`,
  * the register in `theme.ts`, and each moment of the journey in `moments/`.
  * This file only maps the current moment onto the shell. It is YOURS: grow
  * it into your product's UI; the harness never changes.
@@ -12,7 +12,9 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { DevPane } from "@lloyal-labs/dev-tools/react";
 import type { DevControl, RunFraming } from "@lloyal-labs/dev-tools";
-import { appStore, send, useBrief } from "./store.js";
+import { useHarness, useProjection, useSend } from "@lloyal-labs/ui";
+import type { Command, WorkflowEvent } from "../brief/protocol.js";
+import type { AppState } from "./state.js";
 import {
   depthOf, selectActiveDocId, selectAskInFlight, selectLive,
   selectMoment, selectRunDocId, selectShape, shapeOf,
@@ -112,11 +114,13 @@ const COMPOSER_HINT: Record<ReturnType<typeof selectMoment>, string> = {
 };
 
 export function HarnessApp(): ReactElement {
-  const moment = useBrief(selectMoment);
-  const live = useBrief(selectLive);
-  const activeDocId = useBrief(selectActiveDocId);
-  const askInFlight = useBrief(selectAskInFlight);
-  const configuredShape = useBrief(selectShape);
+  const send = useSend<Command>();
+  const { bridge, projection } = useHarness<WorkflowEvent, Command, AppState>();
+  const moment = useProjection(selectMoment);
+  const live = useProjection(selectLive);
+  const activeDocId = useProjection(selectActiveDocId);
+  const askInFlight = useProjection(selectAskInFlight);
+  const configuredShape = useProjection(selectShape);
   const [chosenShape, setChosenShape] = useState<Shape | null>(null);
   const shape = chosenShape ?? configuredShape;
 
@@ -135,13 +139,13 @@ export function HarnessApp(): ReactElement {
   // (one synthetic task, no research) would poison the figure, so
   // single-task runs don't count; an abort teaches nothing. (The library
   // refresh is not the view's to infer: the harness announces it on settle.)
-  const runDocId = useBrief(selectRunDocId);
+  const runDocId = useProjection(selectRunDocId);
   const lastRun = useRef(runDocId);
   useEffect(() => {
     const ended = lastRun.current;
     lastRun.current = runDocId;
     if (ended === null || runDocId !== null) return;
-    const app = appStore().getSnapshot();
+    const app = projection.getSnapshot();
     const doc = app.documents.get(ended);
     if (!doc || doc.phase !== "done") return;
     const tasks = doc.plan?.tasks.length ?? 0;
@@ -150,7 +154,7 @@ export function HarnessApp(): ReactElement {
 
   return (
     <DevPane
-      bridge={window.harness}
+      bridge={bridge}
       framing={FRAMING}
       controls={DEV_CONTROLS}
       title="e2e-0904"
