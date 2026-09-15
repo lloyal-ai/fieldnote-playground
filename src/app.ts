@@ -43,5 +43,6 @@ export function* harness(ctx: SessionContext, events: EventBus<WorkflowEvent>, c
     return;
   }
   if (runner.initialQuery) yield* brief.submit(runner.initialQuery);
-  yield* serveCommands<Command>(commands, [brief, library, settings({ runner, registry, store, wire, run, abilities, config })], { onError: brief.fail });
+  yield* serveCommands<Command>(commands, [brief, library, settings({ runner, registry, store, wire, run, abilities, config })],
+    { onError: brief.fail, until: brief.fatal() });   // a poisoned owner ends the session itself; no command carries that
 }

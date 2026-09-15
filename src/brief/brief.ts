@@ -31,7 +31,12 @@ export function briefs(deps: {
   wire: Channel<WorkflowEvent, void>;
   config: () => Config;
   research: Research;
-}): { handlers: Handlers<Command>; submit(text: string, opts?: SubmitOptions): Operation<Operation<void> | null>; fail(err: unknown): Operation<"exit" | void> } {
+}): {
+  handlers: Handlers<Command>;
+  submit(text: string, opts?: SubmitOptions): Operation<Operation<void> | null>;
+  fail(err: unknown): Operation<"exit" | void>;
+  fatal(): Operation<void>;
+} {
   const { session, library, run, wire, config, research } = deps;
   let activeDocId: DocId | null = null;   // what the canvas shows; null is the picker
   let trunkDocId: DocId | null = null;    // the brief whose thread the trunk holds in full; null until it does
@@ -225,6 +230,18 @@ export function briefs(deps: {
       yield* wire.send({ type: "ui:error", message: errorMessage(err) });
       if (run.poisoned) return "exit";   // the model's state cannot be trusted: the host reaps the session, or the process ends
       yield* abortRun();
+    },
+    /**
+     * The model's state cannot be trusted again: say why, and end the session — settling this is
+     * what ends the command loop, so nothing waits for a question to be asked first.
+     *
+     * The reader does not lose anything by this. The host reaps the session and closes the
+     * connection, and the canvas says the session ended and offers a new one; staying open would
+     * only mean browsing a brief that can no longer be worked on, and discovering that by asking.
+     */
+    *fatal(): Operation<void> {
+      const err = yield* run.whenPoisoned;
+      yield* wire.send({ type: "ui:error", message: `The session cannot continue: ${errorMessage(err)}` });
     },
     handlers: {
       *submit_query(c) {

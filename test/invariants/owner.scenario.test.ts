@@ -106,7 +106,43 @@ test("open_doc during a run moves the canvas and touches no KV", async () => {
   assert.equal(run.events.filter((e) => e.type === "run:aborted").length, 0);
 });
 
-test("a halt whose teardown throws poisons the owner: the next ask is refused, said once, and the harness ends", async () => {
+test("a poisoned owner ends the session on its own, with no second command to trip over it", async () => {
+  // Until it does, nothing at all happens at the moment of failure: the flag is read only by the
+  // guard on `replace`/`stop`, so the reader goes on browsing a session that cannot work and finds
+  // out when their next question throws — with the toast on their action, as if they broke it.
+  // Ending here is what puts the reader in front of a working session: the host reaps this one and
+  // closes the socket, and the page says so.
+  let armed = false;
+  const run = await runHarness({
+    utterances: [
+      { text: PLAN_JSON, kind: "text" },
+      { text: "never finishes", kind: "report", stallTokens: 2000 },
+    ],
+    instrument: (ctx) => {
+      const inner = ctx._branchPrune.bind(ctx);
+      ctx._branchPrune = (handle) => {
+        if (!armed) return inner(handle);
+        armed = false;
+        throw new Error("the branch would not release");
+      };
+    },
+    script: [
+      { send: { type: "submit_query", query: "A?", mode: "flat" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
+      { on: (ev) => { if (ev.type === "agent:produce") armed = true; return ev.type === "agent:produce"; }, send: { type: "stop" } },
+      { on: () => false },   // NOTHING else is sent: the session must end without being asked to
+    ],
+  });
+  assert.equal(run.halted, false, "the harness did not return on its own: it waited to be asked");
+  const toasts = run.events.filter((e) => e.type === "ui:error").map((e) => (e as { message: string }).message);
+  assert.equal(toasts.length, 1, "the reader was told once");
+  assert.match(toasts[0], /cannot continue/, "and told what happened, not just that something did");
+});
+
+// The sibling of the law above, for the arrival that used to be the ONLY way out: an ask sent into
+// a session that has just poisoned. It no longer decides anything — `fatal` has already ended the
+// loop — but what the reader must not see is unchanged: no second run started, and one toast.
+test("an ask that races the poison finds the session already ending: nothing starts, and it is said once", async () => {
   let armed = false;
   let send!: (c: WorkflowEvent) => void;
   const run = await runHarness({
@@ -134,7 +170,9 @@ test("a halt whose teardown throws poisons the owner: the next ask is refused, s
   });
   assert.equal(run.halted, false, "the harness returned by itself");
   const toasts = run.events.filter((e) => e.type === "ui:error").map((e) => (e as { message: string }).message);
-  assert.deepEqual(toasts.map((m) => /poisoned/.test(m)), [true], "one toast: the owner is poisoned");
+  // The wording is `fatal`'s now, not the refusal's: the session ends the moment it poisons, so the
+  // racing ask reaches a loop that is already gone rather than a guard that throws.
+  assert.deepEqual(toasts.map((m) => /cannot continue/.test(m)), [true], "one toast, saying the session cannot continue");
   assert.equal(run.events.filter((e) => e.type === "query").length, 1, "the refused ask was never echoed");
   assert.equal(run.events.filter((e) => e.type === "run:aborted").length, 1, "the stop said its abort; nothing ran after");
 });

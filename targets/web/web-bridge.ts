@@ -46,5 +46,7 @@ export function installWebBridge(): void {
     initialState,
     reduce,
     contentOrigin: resolveContentBaseUrl(),
+    // A served host cannot re-admit an existing connection, so a working session means a new one.
+    recover: () => window.location.reload(),
   });
 }

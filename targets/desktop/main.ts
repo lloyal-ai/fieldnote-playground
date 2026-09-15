@@ -23,7 +23,7 @@ function safeSend(channel: string, payload: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, payload);
 }
 
-function spawnEngine(): Engine<Command, AppState> {
+function createTheEngine(): Engine<Command, AppState> {
   // The engine is THIS project's compiled cli boot; the package forks it, sets the bridge flag and pipes its output.
   // cwd stays the project root so the forked cli reads `harness.yml` and `models/`.
   return createEngine<WorkflowEvent, Command, AppState>({
@@ -36,7 +36,7 @@ function spawnEngine(): Engine<Command, AppState> {
 }
 
 app.whenReady().then(() => {
-  engine = spawnEngine();
+  engine = createTheEngine();
   serveContentScheme(process.cwd(), (bytes, signal) => engine!.ingest(bytes, signal));
   const open = (): void => {
     win = createWindow({
@@ -49,8 +49,14 @@ app.whenReady().then(() => {
     win.on("closed", () => { win = null; });
   };
   open();
+  // The session's life, relayed to whichever renderer is alive. The engine owns it; main carries it.
+  engine.onSession((state) => safeSend(CHANNELS.session, state));
   ipcMain.on(CHANNELS.command, (_e, command: Command) => { engine?.send(command); });
   ipcMain.handle(CHANNELS.snapshot, () => engine!.snapshot());
+  ipcMain.handle(CHANNELS.sessionNow, () => engine!.session());
+  // A reader asking for a working harness. Here that is a new engine process — the renderer's own
+  // IPC link never dropped, which is why this is not a reload.
+  ipcMain.handle(CHANNELS.recover, () => engine!.restart());
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) open();
   });

@@ -2,7 +2,7 @@
  *  canvas, and the docked composer. Moments render inside the canvas. */
 import { useEffect, useRef, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { color, font, radius, thinking } from "../theme.js";
-import { useConnection, useProjection, useSend } from "@lloyal-labs/ui";
+import { useAvailability, useProjection, useRecover, useSend } from "@lloyal-labs/ui";
 import type { Command } from "../../brief/protocol.js";
 import {
   etaOf, selectBanked, selectControls, selectEtaTasks, selectLive, selectMoment,
@@ -230,7 +230,7 @@ export function Shell({ children, dock, library }: {
         )}
       </aside>
       <div style={S.main}>
-        <ConnectionBanner />
+        <AvailabilityBanner />
         <Notice />
         <div ref={canvasRef} style={S.canvas}>
           <RunBar />
@@ -242,22 +242,48 @@ export function Shell({ children, dock, library }: {
   );
 }
 
-/** The link to the local host, made visible. When the socket drops the
- *  whole UI would otherwise go silently quiet — commands vanish, nothing
- *  streams — reading exactly like a frozen app. This says what actually
- *  happened and offers the one recovery (a reload re-opens a fresh session;
- *  the interrupted run does not survive, so we don't pretend it will). Only
- *  the web target reports status; elsewhere useConnection stays 'connected'. */
-function ConnectionBanner(): ReactElement | null {
-  const status = useConnection();
-  if (status !== "lost") return null;
+/** Whether the harness can take work, said out loud. Without this the UI goes
+ *  silently quiet in three different situations — commands vanish, nothing
+ *  streams — and all three read as a frozen app. They are not the same thing
+ *  and the reader needs different words for each:
+ *
+ *  · waiting behind other readers for one of the host's sessions — normal, and
+ *    invisible from the socket, which is perfectly healthy while it happens;
+ *  · this session ended, so the work is gone and a new session is the way on;
+ *  · the connection dropped, which may be nothing but the laptop's wifi.
+ *
+ *  A placement with one in-process harness is always ready, so nothing shows. */
+function AvailabilityBanner(): ReactElement | null {
+  const availability = useAvailability();
+  const recover = useRecover();
+  if (availability === "ready" || availability === "connecting") return null;
+  if (availability === "queued" || availability === "warming") {
+    return (
+      <div role="status" style={S.waiting}>
+        <span className="fn-lamp" style={{ ...S.lamp, background: color.wait }} />
+        <span>
+          {availability === "queued"
+            ? "Waiting for an available session — the host is busy with other readers."
+            : "Starting your session…"}
+        </span>
+      </div>
+    );
+  }
+  // Ended and lost differ in what happened and in what the reader should do, so they differ here.
+  const ended = availability === "ended";
   return (
     <div role="alert" style={S.wire}>
       <span className="fn-lamp" style={{ ...S.lamp, background: color.danger }} />
-      <span>Connection to the local host was lost — it may have stopped or restarted.</span>
-      <button type="button" style={S.wireBtn} onClick={() => window.location.reload()}>
-        Reconnect
-      </button>
+      <span>
+        {ended
+          ? "This session has ended — the host stopped serving it."
+          : "Connection to the local host was lost — it may have stopped or restarted."}
+      </span>
+      {recover && (
+        <button type="button" style={S.wireBtn} onClick={recover}>
+          {ended ? "Start a new session" : "Reconnect"}
+        </button>
+      )}
     </div>
   );
 }
@@ -371,6 +397,11 @@ const S: Record<string, CSSProperties> = {
     backdropFilter: "saturate(1.8) blur(12px)", WebkitBackdropFilter: "saturate(1.8) blur(12px)",
   },
   eta: { color: color.dim, whiteSpace: "nowrap" },
+  waiting: {
+    display: "flex", alignItems: "center", gap: 10, flex: "none",
+    font: `13px ${font.ui}`, color: color.dim, background: color.card2,
+    borderBottom: `1px solid ${color.line}`, padding: "9px 26px",
+  },
   wire: {
     display: "flex", alignItems: "center", gap: 10, flex: "none",
     font: `13px ${font.ui}`, color: color.danger, background: "#F7E2DF",
