@@ -81,7 +81,9 @@ function plannerContext(sources: readonly Ability[], attachments: readonly Attac
 }
 
 /** What each source covers for this ask (remembered in `coverage`), then the planner. The plan is RETURNED — the
- *  brief publishes it; what goes on the wire here is progress nobody's state depends on. Sends preflight:*, plan:start. */
+ *  brief publishes it, and the brief opens the round (`plan:start`) before this is called, because that event
+ *  WITHDRAWS the review the canvas is showing and an algorithm the developer replaced would never send it. What goes
+ *  on the wire here is progress nobody's state depends on. Sends preflight:*. */
 export function* plan(trunk: Branch | null, ask: Inputs, coverage: Map<string, Coverage>): Operation<PlanResult> {
   const wire = yield* useWire<WorkflowEvent>();
   const sources = yield* participating(ask.excluded, ask.sources);
@@ -109,7 +111,6 @@ export function* plan(trunk: Branch | null, ask: Inputs, coverage: Map<string, C
       ? `Source coverage (from a pre-flight probe of each source for this query — use it as the primary signal when assigning each task's \`${TASK_ROUTING_KEY}\`):\n${covered}`
       : "",
   ].filter(Boolean).join("\n\n");
-  yield* wire.send({ type: "plan:start", query: ask.text, mode: ask.mode });
   const planner = new PlanTool({
     prompt: ask.mode === "flat" ? PROMPTS.planFlat : PROMPTS.plan,
     parent: trunk ?? undefined,

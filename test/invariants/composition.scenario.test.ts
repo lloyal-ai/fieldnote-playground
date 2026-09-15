@@ -87,7 +87,10 @@ test("a replaced planner keeps the stock review, continuation and library behavi
       { on: (ev) => ev.type === "complete" },
     ],
   });
-  assert.equal(run.events.filter((e) => e.type === "plan:start").length, 1, "the stock planner never ran; the direct ask says its own plan");
+  // `plan:start` opens a ROUND and is the brief's — both the planned ask and the direct one send it.
+  // What evidences that the stock ALGORITHM never ran is its own telemetry: the recon probe.
+  assert.equal(run.events.filter((e) => e.type === "preflight:start").length, 0, "the stock planner's recon probe ran");
+  assert.equal(run.events.filter((e) => e.type === "plan:start").length, 2, "each round is opened by the brief: the planned ask and the direct one");
   assert.equal(run.events.filter((e) => e.type === "ui:plan_review").length, 1, "the review is the brief's, kept");
   const tasks = (run.events.find((e) => e.type === "fanout:tasks") as { tasks: { description: string }[] }).tasks;
   assert.deepEqual(tasks.map((t) => t.description), ["look into: Q?"]);
@@ -139,4 +142,43 @@ test("a replacement planner's questions are the ones the composer asks the reade
     ],
   });
   assert.deepEqual(selectClarify(foldTo(run.events, "ui:clarify")), ["Which timeframe?", "Which region?"]);
+});
+
+test("replanning from an open review withdraws it: the brief owns the reset, not the algorithm", async () => {
+  // A replacement planner RETURNS a PlanResult and emits nothing. The fold's planning reset — leave
+  // plan_review, drop the parked plan, set the mode, empty the roster — used to ride `plan:start`,
+  // which only the stock planner sent. So a replan from an open review left the reader looking at the
+  // PREVIOUS round's outline, still acceptable, for as long as the new planner took.
+  let round = 0;
+  const plan = function* (_t: Branch | null, ask: Inputs): Operation<PlanResult> {
+    round++;
+    return { intent: "research", tasks: [{ description: `round ${round}: ${ask.text}` }], clarifyQuestions: [], tokenCount: 0, timeMs: 0 } as PlanResult;
+  };
+  const run = await runHarness({
+    harness: composed({ ...research, plan }),
+    utterances: [{ text: "the finding", kind: "report" }],
+    script: [
+      { send: { type: "submit_query", query: "Q?", mode: "deep" } },
+      { on: (ev) => ev.type === "ui:plan_review", send: { type: "change_mode", mode: "flat" } },
+      { on: (ev) => ev.type === "ui:plan_review" },
+    ],
+  });
+
+  // Fold the run and watch the phase between the two reviews.
+  let s: AppState = initialState;
+  const phases: string[] = [];
+  let reviews = 0;
+  const between: string[] = [];
+  for (const ev of run.events) {
+    s = reduce(s, ev);
+    if (ev.type === "ui:plan_review") reviews++;
+    const doc = s.activeDocId ? s.documents.get(s.activeDocId) : undefined;
+    if (doc) { phases.push(doc.phase); if (reviews === 1 && ev.type !== "ui:plan_review") between.push(doc.phase); }
+  }
+  const doc = s.documents.get(s.activeDocId!)!;
+  assert.equal(reviews, 2, "both rounds parked a review");
+  assert.ok(between.includes("planning"),
+    `the canvas never left the first review while the replacement planner ran: ${JSON.stringify([...new Set(between)])}`);
+  assert.equal(doc.mode, "flat", "the reader's mode never reached the fold");
+  assert.deepEqual(selectOutline(s), ["round 2: Q?"], "the second round's plan is the one on the canvas");
 });

@@ -106,6 +106,12 @@ export function briefs(deps: {
 
   /** Plan the brief. The plan waits for the reader's yes — unless the model must ask first, or can answer at once. */
   function* frame(ask: Inputs, review: boolean): Operation<void> {
+    // The round opens HERE, before the planner runs. `plan:start` is not telemetry: it withdraws the
+    // review the canvas is showing, drops the parked plan, sets the mode and empties the roster. An
+    // algorithm the developer replaced returns a value and says nothing, so leaving this to the
+    // algorithm left the reader looking at the previous round's outline — still acceptable — for as
+    // long as the new planner took to think.
+    yield* wire.send({ type: "plan:start", query: ask.text, mode: ask.mode });
     const plan = yield* research.plan(session.trunk, ask, coverage);
     yield* publish(plan);
     if (plan.intent === "clarify") {
