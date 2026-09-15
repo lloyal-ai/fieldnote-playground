@@ -142,6 +142,10 @@ function settledDoc(ev: Extract<WorkflowEvent, { type: 'doc' }>): DocState {
     query: ev.title,
     attachments: ev.attachments ?? [],
     mode: ev.mode,
+    // What the run that WROTE it chose. A report from before these were recorded reports null, and the
+    // byline falls back to the reader's dial — which is the old behaviour, now only where the record is silent.
+    runEffort: ev.effort ?? null,
+    direct: ev.direct,
     answer: ev.answer,
     exchanges: ev.exchanges,
   };

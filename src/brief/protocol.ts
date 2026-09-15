@@ -26,6 +26,9 @@ export interface LibraryEntry {
   title: string;
   savedAt: string;
   mode: Mode | null;
+  /** What wrote it, when the record says: a brief reopened months later must not wear the reader's current dial. */
+  effort: Effort | null;
+  direct: boolean;
   /** The brief carried images — its meta line names their roots. */
   hasMedia: boolean;
 }
@@ -38,6 +41,10 @@ export interface Thread {
   /** Root manifest digests the report recorded. */
   attachments: string[];
   exchanges: { question: string; body: string; attachments: string[] }[];
+  /** The run's own choices, off the report's meta line; null where the record predates them. */
+  mode: Mode | null;
+  effort: Effort | null;
+  direct: boolean;
   /** The whole conversation as one text — what a restore commits to the trunk. */
   thread: string;
 }
@@ -143,7 +150,7 @@ export type BriefEvent =
   | { type: "stats"; timings: OpTiming[]; ctxPct: number; ctxPos: number; ctxTotal: number }
   | { type: "complete"; data: CompleteData }
   /** A settled brief, whole, from disk. Does not activate. */
-  | { type: "doc"; docId: DocId; title: string; mode: Mode | null; attachments?: Descriptor[]; answer: string; exchanges: { question: string; body: string; attachments: string[] }[] }
+  | { type: "doc"; docId: DocId; title: string; mode: Mode | null; effort?: Effort; direct: boolean; attachments?: Descriptor[]; answer: string; exchanges: { question: string; body: string; attachments: string[] }[] }
   /** What the canvas shows. Null is the picker. */
   | { type: "doc:active"; docId: DocId | null }
   /** The run stopped short of complete. A stillborn brief dies with it; a settled one stands. */
@@ -177,7 +184,9 @@ export const docEvent = (thread: Thread, restored: Descriptor[]): Extract<BriefE
   type: "doc",
   docId: thread.docId,
   title: thread.title,
-  mode: null,
+  mode: thread.mode,
+  ...(thread.effort ? { effort: thread.effort } : {}),
+  direct: thread.direct,
   ...(restored.length > 0 ? { attachments: restored } : {}),
   answer: thread.body,
   exchanges: thread.exchanges,

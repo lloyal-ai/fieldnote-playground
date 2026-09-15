@@ -17,6 +17,8 @@ import { ensure } from "effection";
 import type { Channel, Operation } from "effection";
 import { Attachments, RerankerCtx, waitUntilSettled } from "@lloyal-labs/lloyal-agents";
 import type { AbilityFactory, AbilityRegistry } from "@lloyal-labs/lloyal-agents";
+import type { Effort } from "../research/budgets.js";
+import type { Mode } from "./protocol.js";
 import { asAttachment, MANIFEST_TYPE } from "@lloyal-labs/media";
 import type { Attachment, AttachmentStore, Descriptor } from "@lloyal-labs/media";
 import type { EventBus } from "@lloyal-labs/binding";
@@ -35,6 +37,9 @@ interface RunRecord {
   dir: string;
   query: string;
   mode: "flat" | "deep";
+  /** What the reader chose for THIS run. Recorded so a reopened brief wears the dial that wrote it, not the current one. */
+  effort: Effort;
+  direct: boolean;
   /** Root manifest digests the ask carried, then every root a tool result admitted. */
   attachments: string[];
   /** An ask into a settled brief: the answer lands as an exchange beside the report. */
@@ -72,14 +77,27 @@ const stripThink = (text: string): string => {
   return close === -1 ? text : text.slice(close + "</think>".length);
 };
 
+/**
+ * What the meta line records about the run that wrote it: the reasoning mode, the effort, and whether the
+ * ask went straight to one agent. Every field is OPTIONAL by construction — reports written before a field
+ * existed simply lack it, and must keep reading back, so a missing value is `null`/`false`, never a parse
+ * failure. The reader falls back to their own dial only when the record genuinely does not say.
+ */
+export function provenanceOf(metaLine: string): { mode: Mode | null; effort: Effort | null; direct: boolean } {
+  const m = /^> (?:\S+) · (flat|deep)(?: · (low|medium|high|ultra))?(?: · (ask))?/.exec(metaLine);
+  return { mode: (m?.[1] as Mode | undefined) ?? null, effort: (m?.[2] as Effort | undefined) ?? null, direct: m?.[3] === "ask" };
+}
+
 /** Parse a confined report file: the title from the `# query` line, the roots off the meta line, the body past the 3-line header. */
-function readReport(file: string): { title: string; body: string; attachments: string[] } {
+function readReport(file: string): { title: string; body: string; attachments: string[] } & ReturnType<typeof provenanceOf> {
   const lines = fs.readFileSync(file, "utf8").split("\n");
-  const media = /·\s*media\s+((?:sha256:[0-9a-f]{64}\s*)+)/.exec(lines[2] ?? "");
+  const meta = lines[2] ?? "";
+  const media = /·\s*media\s+((?:sha256:[0-9a-f]{64}\s*)+)/.exec(meta);
   return {
     title: (lines[0] ?? "").replace(/^#\s*/, "") || "Reopened report",
     body: lines.slice(3).join("\n").trim(),
     attachments: media ? (media[1] ?? "").trim().split(/\s+/) : [],
+    ...provenanceOf(meta),
   };
 }
 
@@ -131,12 +149,15 @@ export function* openLibrary(
       let text: string;
       try { text = fs.readFileSync(file, "utf8"); } catch { continue; }
       const [titleLine = "", , metaLine = ""] = text.split("\n");
-      const meta = /^> (\S+) · (flat|deep)/.exec(metaLine);
+      const stamp = /^> (\S+) /.exec(metaLine);
+      const prov = provenanceOf(metaLine);
       entries.push({
         path: file, docId: name,
         title: titleLine.replace(/^#\s*/, "") || name,
-        savedAt: meta?.[1] ?? name,
-        mode: meta?.[2] === "flat" || meta?.[2] === "deep" ? meta[2] : null,
+        savedAt: stamp?.[1] ?? name,
+        mode: prov.mode,
+        effort: prov.effort,
+        direct: prov.direct,
         hasMedia: /·\s*media\s+sha256:/.test(metaLine),
       });
     }
@@ -172,6 +193,7 @@ export function* openLibrary(
       .map((p) => readReport(p));
     return {
       docId: id, title: root.title, body: root.body, attachments: root.attachments,
+      mode: root.mode, effort: root.effort, direct: root.direct,
       exchanges: exchanges.map((e) => ({ question: e.title, body: e.body, attachments: e.attachments })),
       thread: [root.body, ...exchanges.map((e) => `---\n\n# ${e.title}\n\n${e.body}`)].join("\n\n"),
     };
@@ -202,7 +224,7 @@ export function* openLibrary(
     const annexures = refs ? `\n---\n\n## Annexures\n\n${refs}\n` : "";
     const stats = r.synthStats ? ` · ${r.synthStats.tokens} synth tokens · ppl ${r.synthStats.ppl.toFixed(2)}` : "";
     const media = r.attachments.length > 0 ? ` · media ${r.attachments.join(" ")}` : "";
-    const meta = `> ${new Date().toISOString()} · ${r.mode}${stats} · ${((Date.now() - r.startedAt) / 1000).toFixed(1)}s${media}`;
+    const meta = `> ${new Date().toISOString()} · ${r.mode} · ${r.effort}${r.direct ? " · ask" : ""}${stats} · ${((Date.now() - r.startedAt) / 1000).toFixed(1)}s${media}`;
     const doc = `# ${r.query}\n\n${meta}\n\n${stripThink(r.lastAnswer).trim()}\n${annexures}`;
     if (r.appending) fs.writeFileSync(path.join(r.dir, `exchange-${reserveName(r.dir, "exchange", 1)}.md`), doc, "utf8");
     else fs.writeFileSync(path.join(r.dir, "report.md"), doc, "utf8");
@@ -309,7 +331,8 @@ export function* openLibrary(
       let taken = 0;
       if (settledAlready) for (const name of fs.readdirSync(folder)) { const m = /^annexure-(\d+)\.md$/.exec(name); if (m) taken = Math.max(taken, Number(m[1])); }
       record = {
-        docId: id, dir: folder, query: ask.text, mode: ask.mode, attachments: ask.attachments.map((a) => a.digest),
+        docId: id, dir: folder, query: ask.text, mode: ask.mode, effort: ask.effort, direct: ask.direct,
+        attachments: ask.attachments.map((a) => a.digest),
         appending: settledAlready, ordinalBase: taken, inResearch: false, lastOrdinal: 0,
         agentToOrdinal: new Map(), taskByOrdinal: new Map(), fileOf: new Map(), startedAt: Date.now(), synthStats: null, lastAnswer: null,
       };

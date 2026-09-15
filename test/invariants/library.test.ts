@@ -17,7 +17,7 @@ import type { EventBus } from "@lloyal-labs/binding";
 import { Attachments } from "@lloyal-labs/lloyal-agents";
 import { NullAttachmentStore } from "@lloyal-labs/media";
 import { createAbilityRegistry, createInMemoryConfigStore } from "@lloyal-labs/rig";
-import { openLibrary } from "../../src/brief/library.js";
+import { openLibrary, provenanceOf } from "../../src/brief/library.js";
 import type { Library } from "../../src/brief/library.js";
 import type { WorkflowEvent } from "../../src/brief/protocol.js";
 import type { Inputs } from "../../src/research/research.js";
@@ -155,4 +155,21 @@ test("roots a tool result admitted ride the meta line beside the ask's own, once
   const meta = fs.readFileSync(path.join(lib, id, "report.md"), "utf8").split("\n")[2] ?? "";
   assert.ok(meta.includes(`media ${own} ${admitted}`), meta);
   assert.equal(meta.split(own).length - 1, 1);
+});
+
+test("a settled brief records the dial that wrote it, and one written before it still reads", () => {
+  // The byline used to read the READER's current effort, so the same brief said "Quick" in one session
+  // and "Standard" in the next, and an Ask read back as a Survey. The record has to carry its own
+  // provenance — and it has to keep reading the reports that already exist, which carry none.
+  const written = provenanceOf("> 2026-09-16T00:00:00.000Z · flat · low · ask · 41 synth tokens · ppl 1.2 · 3.0s");
+  assert.deepEqual(written, { mode: "flat", effort: "low", direct: true }, "what the run chose is on the line");
+
+  const survey = provenanceOf("> 2026-09-16T00:00:00.000Z · deep · ultra · 41 synth tokens · ppl 1.2 · 3.0s");
+  assert.deepEqual(survey, { mode: "deep", effort: "ultra", direct: false }, "no `ask` means it went through the planner");
+
+  // The 40-odd briefs already on disk: mode only, then straight into the stats.
+  const old = provenanceOf("> 2026-09-15T00:00:00.000Z · flat · 2541 synth tokens · ppl 1.35 · 451.2s · media sha256:abc");
+  assert.deepEqual(old, { mode: "flat", effort: null, direct: false }, "an older report reads back, minus what it never said");
+
+  assert.deepEqual(provenanceOf("not a meta line"), { mode: null, effort: null, direct: false }, "and a malformed line is not a throw");
 });
