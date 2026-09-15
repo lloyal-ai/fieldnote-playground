@@ -1,21 +1,22 @@
-# harness.yml — the deployment manifest. Your program lives in harness/harness.ts.
+# harness.yml — the deployment manifest. Your program lives in src/app.ts.
 # Every surface listed explicitly; only the fields you chose are shown.
 #
 #   cli      a terminal app       (npm start)
 #   desktop  a native window      (npm run dev:desktop)
 #   web      a browser app + host (npm run serve · npm run dev:web)
 #
-# One harness over a binding, folding the one reduce in harness/state.ts.
+# One harness over a binding, folding the one reduce in src/ui/state.ts.
 targets: [cli, desktop, web]
 
 model:
   llm:
     id: "qwen3.5-4b"          # add `branches:` or `kvCache:` below to override
     context: 32768
-    branches: 5              # e2e: nSeqMax 5 → research fan-out capacity 2 (5 − 3 reserved)
-    # branches: 32           # concurrent sequences (nSeqMax). Three stand for
-    #                        # the run itself, so a flat fan-out gets the rest
-    #                        # and a wider plan forks in waves.
+    branches: 5              # e2e: deliberately tight, so waves are exercised here
+    # branches: 32           # concurrent sequences (nSeqMax), and the default when
+    #                        # unset. A plan wider than the seats forks in waves:
+    #                        # the pool seats what the context can hold and admits
+    #                        # the rest as branches come back.
     # imageMinTokens: 1024   # per-image detail floor (grounding tasks want it
     # imageMaxTokens: 1024   # high); the max is the lever for fitting vision
     #                        # on a tight machine. Unset ⇒ model metadata.
