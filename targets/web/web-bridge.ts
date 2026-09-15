@@ -9,7 +9,11 @@ import { createBridge } from "@lloyal-labs/binding/web";
 import { initialState, reduce, type AppState } from "../../src/ui/state.js";
 import type { WorkflowEvent, Command } from "../../src/brief/protocol.js";
 
-const DEFAULT_WSS = "ws://127.0.0.1:8787";
+/** Where the host is, when nothing points this page elsewhere. The bundler resolves it from the
+ *  same `.env` the host reads, so a port written once moves both ends of the socket; the literal
+ *  is only for a build that defines nothing. */
+declare const __DEFAULT_WSS__: string | undefined;
+const DEFAULT_WSS = typeof __DEFAULT_WSS__ === "string" ? __DEFAULT_WSS__ : "ws://127.0.0.1:8787";
 
 /** An explicitly-configured host, or null for "wherever this page came from".
  *  Build-time `VITE_WSS_URL` first, then a `?server=` query param. */
@@ -22,7 +26,7 @@ function configuredWssUrl(): string | null {
 /**
  * Base URL for the content plane — HTTP carries bytes, the socket carries
  * references. Never derived from `window.location`: the page is on :5173 in
- * dev while the host is on :8787, and the host is remote-capable. The default
+ * dev while the host is on its own port, and the host is remote-capable. The default
  * is RELATIVE so Vite's proxy keeps dev same-origin; an explicitly-pointed host
  * derives its origin from the socket URL, so `?server=` moves both planes.
  */
