@@ -10,7 +10,7 @@ import { scoped } from "effection";
 import type { Channel, Operation } from "effection";
 import type { Session } from "@lloyal-labs/sdk";
 import { waitUntilSettled } from "@lloyal-labs/lloyal-agents";
-import { admitted, singleTaskPlan } from "@lloyal-labs/rig";
+import { admitted, singleTaskPlan, OperationFailure } from "@lloyal-labs/rig";
 import type { Execution, Handlers, PlanResult, ResearchTask, Coverage } from "@lloyal-labs/rig";
 import type { Descriptor } from "@lloyal-labs/media";
 import type { Inputs, Research } from "../research/research.js";
@@ -158,14 +158,23 @@ export function briefs(deps: {
 
   /** One step of a brief's life, under the run's ownership. Returns the accepted run. An ordinary failure — the body's
    *  own, or a child's — releases the folder, says why, and stays on the run's future. A run no longer live is being
-   *  halted: whatever reaches it then is its teardown's, rethrown as it came for the owner to judge. */
+   *  halted: whatever reaches it then is rethrown as it came for the owner to judge.
+   *
+   *  What this catch CANNOT do is tell the body's own failure from a teardown failure raised inside it. Both arrive
+   *  here by the same route: the pool's cleanups run within `body()`, so a branch that will not release surfaces
+   *  exactly where a failed planner does (the poison law in `owner.scenario.test.ts` is that case). Only a failure
+   *  this function raises ITSELF is known — `HarnessExit`, thrown forward by the framing with nothing unwinding — and
+   *  only that one is marked as the operation's own. The rest keep the owner's fatal-during-halt reading, which is
+   *  safe but, as the third review showed, can poison a session whose cleanup actually succeeded. Closing that needs
+   *  the scope that RUNS a cleanup to say so; see docs/plan/review-3-findings.md. */
   function* startRun(ask: Inputs, body: () => Operation<void>): Operation<Operation<void>> {
     live = ask.docId;   // until the body says `complete`, parks, or dies below
     return yield* run.replace(ask.docId, () => scoped(function* () {   // the boundary: a failing child fails here, not the session
       try {
         yield* body();
       } catch (err) {
-        if (err instanceof HarnessExit || live !== ask.docId) throw err;
+        if (err instanceof HarnessExit) throw new OperationFailure(err);   // the brief's own, raised forward
+        if (live !== ask.docId) throw err;
         live = null;
         pendingPlan = null;
         trunkDocId = null;   // a write that failed may have left part of a turn; the next ask rebuilds from the library

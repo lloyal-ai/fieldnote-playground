@@ -400,7 +400,19 @@ function docReduce(doc: DocState, ev: WorkflowEvent): DocState {
       };
 
     case 'preflight:done':
-      return doc;
+      // Discovery is over; the planner speaks next. `preflight:start` moved the canvas to
+      // 'discovering' and nothing moved it back — the round's own `plan:start` used to, which is how
+      // ONE event came to own two jobs: opening a round, and ending discovery. The brief opens the
+      // round now, before any of this, so the end of discovery says so itself: the probes' timeline
+      // vanishes and the planner is A0 again, which is what lets the outline draft in the view.
+      if (asking) return doc;
+      return {
+        ...doc,
+        phase: 'planning',
+        roster: emptyRoster(),
+        reconAgentIds: [],
+        pipelineResumedAt: Date.now(),
+      };
 
     case 'plan:start':
       // A warm ask's synthetic plan must not retitle the document or leave

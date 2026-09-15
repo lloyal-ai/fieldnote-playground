@@ -30,6 +30,10 @@ import { reduce, initialState } from "../../src/ui/state.js";
 import type { AppState } from "../../src/ui/state.js";
 import { selectClarify, selectOutline, selectSections } from "../../src/ui/select.js";
 import { runHarness, docIdOfQuery, accept } from "./harness.js";
+import * as os from "node:os";
+import { FileAttachmentStore } from "@lloyal-labs/media/node";
+import { DOCUMENT_CONFIG_TYPE } from "@lloyal-labs/media";
+import type { Attachment, DocumentMeta } from "@lloyal-labs/media";
 
 const TWO_TASKS = JSON.stringify({ intent: "research", tasks: [{ description: "one" }, { description: "two" }], clarifyQuestions: [] });
 
@@ -74,7 +78,9 @@ test("the stock writer with only its settling stage replaced runs to a settled b
 });
 
 test("a replaced planner keeps the stock review, continuation and library behaviour", async () => {
+  let calls = 0;
   const plan = function* (_trunk: Branch | null, ask: Inputs): Operation<PlanResult> {
+    calls++;
     return { intent: "research", tasks: [{ description: `look into: ${ask.text}` }], clarifyQuestions: [], tokenCount: 0, timeMs: 0 } as PlanResult;
   };
   const run = await runHarness({
@@ -87,9 +93,10 @@ test("a replaced planner keeps the stock review, continuation and library behavi
       { on: (ev) => ev.type === "complete" },
     ],
   });
-  // `plan:start` opens a ROUND and is the brief's — both the planned ask and the direct one send it.
-  // What evidences that the stock ALGORITHM never ran is its own telemetry: the recon probe.
-  assert.equal(run.events.filter((e) => e.type === "preflight:start").length, 0, "the stock planner's recon probe ran");
+  // Direct invocation evidence: the replacement counted its own calls. Zero `preflight:start` would
+  // NOT prove this — preflight needs two participating sources and this fixture has one, so stock
+  // planning would emit none either.
+  assert.equal(calls, 1, "the replacement planner was not the one that ran");
   assert.equal(run.events.filter((e) => e.type === "plan:start").length, 2, "each round is opened by the brief: the planned ask and the direct one");
   assert.equal(run.events.filter((e) => e.type === "ui:plan_review").length, 1, "the review is the brief's, kept");
   const tasks = (run.events.find((e) => e.type === "fanout:tasks") as { tasks: { description: string }[] }).tasks;
@@ -181,4 +188,63 @@ test("replanning from an open review withdraws it: the brief owns the reset, not
     `the canvas never left the first review while the replacement planner ran: ${JSON.stringify([...new Set(between)])}`);
   assert.equal(doc.mode, "flat", "the reader's mode never reached the fold");
   assert.deepEqual(selectOutline(s), ["round 2: Q?"], "the second round's plan is the one on the canvas");
+});
+
+/** A store holding one document — a second participating source, so the stock planner probes coverage. */
+function plantDocument(): { store: FileAttachmentStore; doc: Attachment } {
+  const store = new FileAttachmentStore(fs.mkdtempSync(path.join(os.tmpdir(), "composition-scn-")));
+  const title = "Fixture Paper";
+  const meta: DocumentMeta = {
+    title, pageCount: 1,
+    sections: [{ heading: title, path: title, origin: "heuristic", startLine: 1, endLine: 2, pageStart: 1, pageEnd: 1 }],
+    pages: [{ page: 1, startLine: 1, endLine: 4, chars: 30, imageObjects: 0, pathObjects: 0, taggedTables: 0, taggedFigures: 0 }],
+    figures: [], tables: [],
+    derive: { profile: "pdf.v1", pdfium: "test", dpi: 150, maxSide: 2048, maxPixels: 4194304, format: "image/png",
+      renderedPages: 0, maxFigures: 16, maxTextPages: 400, tagged: false, structCoverage: 0, truncated: false },
+  };
+  const doc = store.putAttachment({
+    representations: [store.putBlob(new TextEncoder().encode(`# ${title}\n\nAlpha beta gamma.\n`), "text/markdown")],
+    config: { bytes: new TextEncoder().encode(JSON.stringify(meta)), mediaType: DOCUMENT_CONFIG_TYPE },
+  });
+  return { store, doc };
+}
+
+test("stock planning with two sources leaves discovery behind: the planner drafts in `planning`, not as a third probe", async () => {
+  // `preflight:start` moves the canvas to `discovering`; nothing moved it back except the later
+  // `plan:start` — which is how ONE event came to own two jobs: opening the round, and ending
+  // discovery. The round is the brief's now, so the end of discovery has to say so itself. Without
+  // that, the status stays "Browsing your sources", the live outline never draws, and the planner is
+  // folded as another source probe.
+  const { store, doc } = plantDocument();
+  const run = await runHarness({
+    attachmentStore: store,
+    utterances: [
+      { text: "this source covers the question", kind: "text" },
+      { text: "this source covers it too", kind: "text" },
+      { text: TWO_TASKS, kind: "text" },
+      { text: "first finding", kind: "report" },
+      { text: "second finding", kind: "report" },
+      { text: "the settled brief", kind: "text" },
+    ],
+    script: [
+      { send: { type: "submit_query", query: "Q?", mode: "flat", attachments: [doc] } },
+      { on: (ev) => ev.type === "ui:plan_review", send: accept },
+      { on: (ev) => ev.type === "complete" },
+    ],
+  });
+
+  assert.equal(run.events.filter((e) => e.type === "preflight:start").length, 1,
+    "two sources should have drawn a cold coverage probe; this fixture no longer exercises it");
+
+  let s: AppState = initialState;
+  let atDiscoveryEnd: AppState | null = null;
+  for (const ev of run.events) {
+    s = reduce(s, ev);
+    if (ev.type === "preflight:done") atDiscoveryEnd = s;
+  }
+  assert.ok(atDiscoveryEnd, "no preflight:done on the wire");
+  const doc2 = atDiscoveryEnd!.documents.get(atDiscoveryEnd!.runDocId!)!;
+  assert.equal(doc2.phase, "planning", "the canvas is still browsing sources while the planner writes the outline");
+  assert.deepEqual(doc2.reconAgentIds, [], "the probe agents still hold the timeline the planner is about to draw into");
+  assert.equal(doc2.roster.agents.size, 0, "the planner is not A0: the probes' roster survived into planning");
 });

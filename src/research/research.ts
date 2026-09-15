@@ -82,8 +82,11 @@ function plannerContext(sources: readonly Ability[], attachments: readonly Attac
 
 /** What each source covers for this ask (remembered in `coverage`), then the planner. The plan is RETURNED — the
  *  brief publishes it, and the brief opens the round (`plan:start`) before this is called, because that event
- *  WITHDRAWS the review the canvas is showing and an algorithm the developer replaced would never send it. What goes
- *  on the wire here is progress nobody's state depends on. Sends preflight:*. */
+ *  WITHDRAWS the review the canvas is showing and an algorithm the developer replaced would never send it.
+ *
+ *  `preflight:*` IS load-bearing, and saying otherwise was how this went wrong once: `preflight:start` moves the
+ *  canvas to discovering and `preflight:done` moves it back to planning, so a coverage probe that announces its start
+ *  must announce its end. A planner that probes nothing announces neither and stays in planning throughout. */
 export function* plan(trunk: Branch | null, ask: Inputs, coverage: Map<string, Coverage>): Operation<PlanResult> {
   const wire = yield* useWire<WorkflowEvent>();
   const sources = yield* participating(ask.excluded, ask.sources);
